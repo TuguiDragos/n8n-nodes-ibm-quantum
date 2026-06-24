@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a problem with the IBM Quantum node
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: Describe the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Resource, operation, and the values you used. Redact any credentials.
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Node package version, n8n version, and region.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output
+      description: Any error message from the node. Redact tokens and CRNs.
+    validations:
+      required: false

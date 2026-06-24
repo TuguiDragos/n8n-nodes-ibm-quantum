@@ -1,0 +1,76 @@
+{
+  "name": "n8n-nodes-ibm-quantum",
+  "version": "0.1.0",
+  "description": "n8n community node to build, run and retrieve quantum circuits on the IBM Quantum Platform",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "ibm-quantum",
+    "qiskit",
+    "quantum-computing",
+    "openqasm"
+  ],
+  "license": "MIT",
+  "homepage": "https://tuguidragos.com",
+  "author": {
+    "name": "Țugui Dragoș-Constantin",
+    "email": "contact@tuguidragos.com",
+    "url": "https://tuguidragos.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TuguiDragos/n8n-nodes-ibm-quantum.git"
+  },
+  "bugs": {
+    "url": "https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/issues"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && node scripts/copy-icons.mjs",
+    "dev": "tsc --watch",
+    "format": "prettier nodes credentials --write",
+    "format:check": "prettier nodes credentials --check",
+    "lint": "eslint nodes credentials",
+    "lintfix": "eslint nodes credentials --fix",
+    "scan": "npx --yes @n8n/scan-community-package@latest",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build && npm run lint && npm run test"
+  },
+  "files": [
+    "dist",
+    "index.js"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/IbmQuantumApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/IbmQuantum/IbmQuantum.node.js",
+      "dist/nodes/IbmQuantum/IbmQuantumTrigger.node.js",
+      "dist/nodes/IbmQuantum/IbmQuantumErrorTrigger.node.js"
+    ]
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  },
+  "devDependencies": {
+    "@n8n/eslint-plugin-community-nodes": "^0.21.0",
+    "@types/node": "^22.10.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "eslint": "^9.29.0",
+    "n8n-workflow": "^2.16.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0",
+    "vitest": "^3.2.0"
+  }
+}
