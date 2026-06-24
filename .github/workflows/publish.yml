@@ -29,6 +29,8 @@ jobs:
             echo "package.json version ($PKG) does not match the release tag ($TAG)"
             exit 1
           fi
-      # Authentication uses the npm trusted publisher (OIDC), so no long-lived token is needed.
-      # prepublishOnly runs build, lint and test before the package is published.
+      # Auth uses an npm automation token; provenance still works because the repo is public
+      # and the job has id-token: write. prepublishOnly runs build, lint and test first.
       - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
