@@ -43,7 +43,8 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 			qubits = parseNumberListStrict((raw.qubits as string) ?? '', 'Qubits');
 			params = parseNumberListStrict((raw.params as string) ?? '', 'Parameters');
 		} catch (error) {
-			throw new NodeOperationError(node, `Gate #${idx + 1} (${gate}): ${(error as Error).message}`, {
+			const message = error instanceof Error ? error.message : String(error);
+			throw new NodeOperationError(node, `Gate #${idx + 1} (${gate}): ${message}`, {
 				itemIndex,
 			});
 		}
@@ -101,7 +102,9 @@ async function getLeastBusy(
 	const candidates = devices
 		.filter((device) => {
 			if (!includeSimulators && device.is_simulator === true) return false;
-			if (minQubits > 0 && typeof device.qubits === 'number' && (device.qubits as number) < minQubits) {
+			// A device with an unknown qubit count cannot be proven to meet the minimum, so exclude it
+			// rather than fail open and return a backend that may be smaller than the user asked for.
+			if (minQubits > 0 && (typeof device.qubits !== 'number' || (device.qubits as number) < minQubits)) {
 				return false;
 			}
 			return statusName(device) === 'online';
@@ -145,6 +148,34 @@ function parseJsonParameter(value: string, node: INode, label: string, itemIndex
 		return JSON.parse(value);
 	} catch {
 		throw new NodeOperationError(node, `${label} must be valid JSON`, { itemIndex });
+	}
+}
+
+// Gather the Pauli term strings from any of the accepted observable shapes: a bare string, an
+// array of strings, or a coefficient map { "IIZII": 1.0 } (terms are the keys). Unrecognized
+// leaves are ignored so the server still validates anything this does not understand.
+function collectPauliTerms(value: unknown, out: string[]): void {
+	if (typeof value === 'string') {
+		out.push(value);
+	} else if (Array.isArray(value)) {
+		for (const entry of value) collectPauliTerms(entry, out);
+	} else if (value && typeof value === 'object') {
+		out.push(...Object.keys(value as Record<string, unknown>));
+	}
+}
+
+// Catch a malformed Pauli string locally instead of after a wasted submit round-trip. The UI
+// promises only the letters I, X, Y and Z; a stricter length-vs-qubits check is left to IBM.
+function validateObservables(observables: unknown, node: INode, itemIndex: number): void {
+	const terms: string[] = [];
+	collectPauliTerms(observables, terms);
+	const bad = terms.find((term) => !/^[IXYZ]+$/.test(term));
+	if (bad !== undefined) {
+		throw new NodeOperationError(
+			node,
+			`Observables: "${bad}" is not a valid Pauli string. Use only the letters I, X, Y and Z, one per qubit.`,
+			{ itemIndex },
+		);
 	}
 }
 
@@ -192,6 +223,15 @@ export function buildPubData(
 function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDataObject {
 	const additionalOptionsRaw = this.getNodeParameter('additionalOptions', itemIndex, '{}') as string;
 	const parsed = parseJsonParameter(additionalOptionsRaw, this.getNode(), 'Additional Options', itemIndex);
+	// An array or scalar would be spread into options as numeric-index keys and rejected by IBM, so
+	// reject it inline with a clear message instead of sending a corrupt request. null means "no options".
+	if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Additional Options must be a JSON object, for example {"default_shots": 4096}.',
+			{ itemIndex },
+		);
+	}
 	const base: IDataObject =
 		parsed && typeof parsed === 'object' ? (parsed as IDataObject) : {};
 	return mergePrimitiveOptions(
@@ -232,6 +272,7 @@ async function submitJob(
 	if (primitive === 'estimator') {
 		const observablesRaw = this.getNodeParameter('observables', itemIndex) as string;
 		const observables = parseJsonParameter(observablesRaw, this.getNode(), 'Observables', itemIndex);
+		validateObservables(observables, this.getNode(), itemIndex);
 		params.resilience_level = this.getNodeParameter('resilienceLevel', itemIndex, 1) as number;
 		const precision = this.getNodeParameter('precision', itemIndex, 0) as number;
 		pub = buildPubData('estimator', qasm3, observables, parameters, 0, precision);
@@ -273,17 +314,26 @@ export function isTerminalStatus(status: string): boolean {
 	return TERMINAL.includes(status) || status.startsWith('cancel');
 }
 
+// Coerce a user-supplied seconds value to a usable positive number, falling back when it is
+// non-finite or below 1. The field's minValue is only a UI hint, so an expression can bypass it
+// with 0, a negative number, or a non-numeric value (NaN). Without this, pollInterval -> NaN
+// busy-loops the API and maxWait -> NaN makes the deadline NaN so the loop never times out.
+function clampSeconds(value: unknown, fallback: number): number {
+	const n = Number(value);
+	return Number.isFinite(n) && n >= 1 ? n : fallback;
+}
+
 async function getResults(
 	this: IExecuteFunctions,
 	ctx: RequestContext,
 	itemIndex: number,
 ): Promise<IDataObject> {
 	const jobId = this.getNodeParameter('jobId', itemIndex) as string;
-	const pollInterval = this.getNodeParameter('pollInterval', itemIndex, 5) as number;
-	const maxWait = this.getNodeParameter('maxWait', itemIndex, 300) as number;
+	const intervalSec = clampSeconds(this.getNodeParameter('pollInterval', itemIndex, 5), 5);
+	const maxWaitSec = clampSeconds(this.getNodeParameter('maxWait', itemIndex, 300), 300);
 	const registerName = this.getNodeParameter('registerName', itemIndex, '') as string;
 
-	const deadline = Date.now() + maxWait * 1000;
+	const deadline = Date.now() + maxWaitSec * 1000;
 	let status = '';
 	let jobInfo: IDataObject = {};
 
@@ -294,7 +344,7 @@ async function getResults(
 		if (isTerminalStatus(status)) break;
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) break;
-		await sleep(Math.min(pollInterval * 1000, remaining));
+		await sleep(Math.min(intervalSec * 1000, remaining));
 	}
 
 	if (!isTerminalStatus(status)) return { jobId, status, timedOut: true, job: jobInfo };

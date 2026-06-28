@@ -9,6 +9,25 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 
+// Build a short, non-sensitive hint from an IAM error. Reads ONLY the HTTP status and IBM's
+// public error code (e.g. BXNIM0415E); never the message, headers, request config or response
+// body, any of which can carry the API key. Returns '' when nothing safe is available.
+function iamFailureHint(error: unknown): string {
+	const err = error as {
+		httpCode?: number | string;
+		statusCode?: number;
+		response?: { status?: number; data?: { errorCode?: unknown } };
+	} | null;
+	const status = Number(err?.response?.status ?? err?.statusCode ?? err?.httpCode);
+	const code = err?.response?.data?.errorCode;
+	const parts: string[] = [];
+	if (status === 429) parts.push('rate limited by IBM IAM');
+	else if (status === 400 || status === 401 || status === 403) parts.push('the API key was rejected');
+	else if (status >= 500) parts.push('IBM IAM is temporarily unavailable');
+	if (typeof code === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(code)) parts.push(`code ${code}`);
+	return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
 export class IbmQuantumApi implements ICredentialType {
 	name = 'ibmQuantumApi';
 
@@ -36,7 +55,7 @@ export class IbmQuantumApi implements ICredentialType {
 			default: '',
 			required: true,
 			description:
-				'Cloud Resource Name (CRN) of your Qiskit Runtime instance. Copy it from the instance details page in the IBM Quantum Platform console. It starts with crn:v1.',
+				'Cloud Resource Name (CRN) of your Qiskit Runtime instance. Copy it from the instances page (quantum.cloud.ibm.com/instances) in the IBM Quantum Platform console. It starts with crn:v1.',
 		},
 		{
 			displayName: 'Region',
@@ -55,6 +74,7 @@ export class IbmQuantumApi implements ICredentialType {
 			name: 'apiVersion',
 			type: 'string',
 			default: '2026-04-15',
+			placeholder: '2026-04-15',
 			description:
 				'Date (YYYY-MM-DD) that selects the IBM API response format. Leave the default unless IBM docs require a newer version.',
 		},
@@ -92,10 +112,11 @@ export class IbmQuantumApi implements ICredentialType {
 		let response: { access_token?: string };
 		try {
 			response = (await this.helpers.httpRequest(options)) as { access_token?: string };
-		} catch {
-			// The underlying error can carry the request body, which holds the API key. Never surface it.
+		} catch (error) {
+			// The underlying error can carry the request body, which holds the API key, so never
+			// surface error.message or the response body. Only an allowlisted status/code is added.
 			throw new Error(
-				'IBM IAM token request failed. Check that the API key is valid and the account has IBM Quantum access.',
+				`IBM IAM token request failed${iamFailureHint(error)}. Check that the API key is valid and the account has IBM Quantum access.`,
 			);
 		}
 		if (!response?.access_token) {

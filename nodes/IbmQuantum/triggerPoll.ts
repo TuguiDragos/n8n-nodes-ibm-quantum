@@ -35,7 +35,9 @@ export async function pollJobs(
 		? (response as IDataObject[])
 		: ((response.jobs as IDataObject[]) ?? (response.workloads as IDataObject[]) ?? []);
 
-	const matched = jobs.filter(matches);
+	// A job with no id cannot be deduplicated (every String(undefined) collides), so skip it. The
+	// IBM API always returns an id; this only guards a malformed or partial response.
+	const matched = jobs.filter((job) => job.id != null && matches(job));
 
 	if (poll.getMode() === 'manual') {
 		if (matched.length === 0) return [poll.helpers.returnJsonArray([])];

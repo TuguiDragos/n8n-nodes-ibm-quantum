@@ -8,4 +8,3 @@ Describe what this pull request changes and why.
 - [ ] `npm run build` passes
 - [ ] `npm test` passes
 - [ ] Tests cover the change where practical
-- [ ] CHANGELOG.md is updated under Unreleased

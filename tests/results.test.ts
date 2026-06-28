@@ -75,3 +75,33 @@ describe('parseResults', () => {
 		expect(parseResults({})).toEqual({ pubCount: 0, pubs: [] });
 	});
 });
+
+describe('samplesToCounts wide-register precision (BigInt, not parseInt)', () => {
+	it('keeps distinct outcomes that differ only in low bits beyond 53 bits', () => {
+		// 0x20000000000000 = 2^53 and 0x20000000000001 = 2^53 + 1. parseInt would collapse both to
+		// the same double; BigInt keeps them apart as two 54-bit bitstrings.
+		const counts = samplesToCounts(['0x20000000000001', '0x20000000000000'], 54) as Record<
+			string,
+			number
+		>;
+		const keys = Object.keys(counts);
+		expect(keys).toHaveLength(2);
+		expect(keys.every((k) => k.length === 54)).toBe(true);
+		expect(counts['1' + '0'.repeat(53)]).toBe(1);
+		expect(counts['1' + '0'.repeat(52) + '1']).toBe(1);
+	});
+
+	it('skips unparseable samples without collapsing them into a key', () => {
+		expect(samplesToCounts(['0x3', 'zz', ''], 2)).toEqual({ '11': 1 });
+	});
+});
+
+describe('inferNumBits NaN guard', () => {
+	it('does not let an unparseable sample inflate the inferred width', () => {
+		// num_bits absent: width is inferred. 'zz' must be ignored, not treated as 3 bits ('NaN').
+		const response = { results: [{ data: { c: { samples: ['0x1', 'zz'] } }, metadata: {} }] };
+		const pub = (parseResults(response).pubs as Array<Record<string, unknown>>)[0];
+		expect(pub.numBits).toBe(1);
+		expect(pub.counts).toEqual({ '1': 1 });
+	});
+});

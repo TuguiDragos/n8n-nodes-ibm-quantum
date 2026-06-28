@@ -1,10 +1,21 @@
 import type { IDataObject } from 'n8n-workflow';
 
+// Parse a hex sample (e.g. "0x3") with BigInt so registers wider than 53 bits keep every bit.
+// parseInt returns a double that is exact only up to 2^53-1, which silently drops the low bits
+// of a wide register and collapses distinct outcomes. Returns null for anything not parseable.
+function hexToBigInt(sample: string): bigint | null {
+	try {
+		return BigInt(/^0x/i.test(sample) ? sample : `0x${sample}`);
+	} catch {
+		return null;
+	}
+}
+
 export function samplesToCounts(samples: string[], numBits: number): IDataObject {
 	const counts: Record<string, number> = {};
 	for (const sample of samples) {
-		const value = parseInt(sample, 16);
-		if (Number.isNaN(value)) continue;
+		const value = hexToBigInt(sample);
+		if (value === null) continue;
 		const bitstring = value.toString(2).padStart(numBits, '0');
 		counts[bitstring] = (counts[bitstring] ?? 0) + 1;
 	}
@@ -14,7 +25,9 @@ export function samplesToCounts(samples: string[], numBits: number): IDataObject
 function inferNumBits(samples: string[]): number {
 	let max = 1;
 	for (const sample of samples) {
-		const length = parseInt(sample, 16).toString(2).length;
+		const value = hexToBigInt(sample);
+		if (value === null) continue;
+		const length = value.toString(2).length;
 		if (length > max) max = length;
 	}
 	return max;

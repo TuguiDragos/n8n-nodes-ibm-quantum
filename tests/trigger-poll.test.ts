@@ -83,4 +83,50 @@ describe('IbmQuantumTrigger.poll deduplication', () => {
 		expect(result![0][0].json.id).toBe('m1');
 		expect(staticData.seenJobIds).toBeUndefined();
 	});
+
+	it('caps the seen-id cursor at 500 entries (TEST-09)', async () => {
+		// A real poll window is <=200, so >500 in one poll is unreachable via the API; this only
+		// pins the slice(-500) bound so the cursor cannot grow without limit.
+		const jobs = Array.from({ length: 600 }, (_, i) => ({ id: `j${i}`, status: 'completed' }));
+		const staticData: Record<string, unknown> = {};
+		const { ctx } = makeContext({ jobs }, staticData);
+
+		await poll(ctx);
+		expect((staticData.seenJobIds as string[]).length).toBe(500);
+	});
+
+	it('skips jobs with no id instead of collapsing them to one cursor entry (TEST-09)', async () => {
+		const jobsRef = { jobs: [{ status: 'completed' } as unknown as Job] };
+		const staticData: Record<string, unknown> = {};
+		const { ctx } = makeContext(jobsRef, staticData, 'manual');
+
+		const result = await poll(ctx);
+		expect(result![0]).toHaveLength(0);
+	});
+});
+
+describe('IbmQuantumTrigger.poll response normalization (TEST-10)', () => {
+	function ctxWithResponse(response: unknown, mode: 'trigger' | 'manual' = 'manual') {
+		return {
+			getNodeParameter: (name: string) => (name === 'statusFilter' ? 'any' : 20),
+			getCredentials: async () => ({ region: 'us-east' }),
+			getMode: () => mode,
+			getNode: () => ({ name: 'IBM Quantum Trigger' }),
+			getWorkflowStaticData: () => ({}),
+			helpers: {
+				httpRequestWithAuthentication: async () => response,
+				returnJsonArray: (data: Job[]) => data.map((json) => ({ json })),
+			},
+		};
+	}
+
+	it('reads jobs from a bare array response', async () => {
+		const result = await poll(ctxWithResponse([{ id: 'a', status: 'completed' }]));
+		expect(result![0][0].json.id).toBe('a');
+	});
+
+	it('reads jobs from a { workloads: [] } response', async () => {
+		const result = await poll(ctxWithResponse({ workloads: [{ id: 'b', status: 'failed' }] }));
+		expect(result![0][0].json.id).toBe('b');
+	});
 });

@@ -12,9 +12,16 @@ export interface RequestContext {
 	baseUrl: string;
 }
 
-const REGION_HOSTS: Record<string, string> = {
-	'us-east': 'https://quantum.cloud.ibm.com',
-	'eu-de': 'https://eu-de.quantum.cloud.ibm.com',
+// Region hosts are the single source of truth for the API base. The credential test mirrors
+// this mapping in a static expression; a unit test asserts the two stay in sync (see
+// tests/credentials.test.ts) so adding a region without a host fails CI instead of silently
+// falling back to us-east.
+export const QUANTUM_HOST_US = 'https://quantum.cloud.ibm.com';
+export const QUANTUM_HOST_EU = 'https://eu-de.quantum.cloud.ibm.com';
+
+export const REGION_HOSTS: Record<string, string> = {
+	'us-east': QUANTUM_HOST_US,
+	'eu-de': QUANTUM_HOST_EU,
 };
 
 export function getBaseUrl(region: string): string {

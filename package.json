@@ -1,14 +1,15 @@
 {
   "name": "n8n-nodes-ibm-quantum",
-  "version": "0.1.0",
-  "description": "n8n community node to build, run and retrieve quantum circuits on the IBM Quantum Platform",
+  "version": "0.1.1",
+  "description": "n8n community node to build, submit and retrieve quantum circuits on the IBM Quantum Platform, with triggers for asynchronous job completion and failure handling",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
     "ibm-quantum",
     "qiskit",
     "quantum-computing",
-    "openqasm"
+    "openqasm",
+    "trigger"
   ],
   "license": "MIT",
   "homepage": "https://tuguidragos.com",

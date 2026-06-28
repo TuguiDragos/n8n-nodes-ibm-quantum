@@ -76,7 +76,8 @@ export class IbmQuantum implements INodeType {
 				returnData.push({ json: result, pairedItem: { item: i } });
 			} catch (error) {
 				if (this.continueOnFail()) {
-					returnData.push({ json: { error: (error as Error).message }, pairedItem: { item: i } });
+					const message = error instanceof Error ? error.message : String(error);
+					returnData.push({ json: { error: message }, pairedItem: { item: i } });
 					continue;
 				}
 				// Preserve the context-rich errors raised downstream, and wrap only raw ones.

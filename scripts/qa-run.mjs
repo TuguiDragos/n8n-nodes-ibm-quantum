@@ -10,7 +10,7 @@
 const BASE = process.env.N8N_BASE || 'http://localhost:5678';
 const API = `${BASE}/api/v1`;
 const KEY = process.env.N8N_API_KEY;
-const CRED = { ibmQuantumApi: { id: process.env.QA_CRED_ID || '8vtvBEkofwRMsod3', name: 'IBM Quantum account' } };
+const CRED = { ibmQuantumApi: { id: process.env.QA_CRED_ID, name: process.env.QA_CRED_NAME || 'IBM Quantum account' } };
 const BACKEND = process.env.QA_BACKEND || 'ibm_kingston';
 const IBM = 'CUSTOM.ibmQuantum';
 const TRIGGER = 'CUSTOM.ibmQuantumTrigger';
@@ -18,6 +18,7 @@ const ERROR_TRIGGER = 'CUSTOM.ibmQuantumErrorTrigger';
 const KEEP = process.env.KEEP === '1';
 
 if (!KEY) { console.error('Set N8N_API_KEY'); process.exit(1); }
+if (!CRED.ibmQuantumApi.id) { console.error('Set QA_CRED_ID (the n8n credential record id)'); process.exit(1); }
 
 const created = [];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

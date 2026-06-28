@@ -243,7 +243,7 @@ export const nodeProperties: INodeProperties[] = [
 		required: true,
 		default: '',
 		placeholder: 'ibm_brisbane',
-		description: 'Backend that will run the circuit. Must already be transpiled to this backend, or rely on server-side compilation.',
+		description: 'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 	{
@@ -281,7 +281,7 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'json',
 		default: '"ZZ"',
 		description:
-			'Quantity the Estimator measures, written as a Pauli string of the letters I, X, Y and Z (one per qubit, e.g. "ZZ"). Provide a single string or a JSON array of strings; each must match the number of qubits.',
+			'Quantity the Estimator measures, written as a Pauli string of the letters I, X, Y and Z (one per qubit, e.g. "ZZ"). Provide a single string or a JSON array of strings; each must match the number of qubits in the circuit (the length is validated by IBM at submit time).',
 		displayOptions: { show: { resource: ['job'], operation: ['submitEstimator'] } },
 	},
 	{
@@ -345,7 +345,7 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'json',
 		default: '{}',
 		description:
-			'Advanced JSON options passed straight to the primitive, for example {"default_shots": 4096}. Most workflows can leave this empty. See the IBM Qiskit Runtime primitive options documentation.',
+			'Advanced JSON options passed straight to the primitive, for example {"default_shots": 4096}. Most workflows can leave this as {}. See the IBM Qiskit Runtime primitive options documentation.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 

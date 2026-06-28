@@ -22,6 +22,19 @@ The node groups its work into five resources.
 | Session | Create (batch or dedicated), Get, Set Accepting Jobs, Close |
 | Account | Get Usage, Get Instance |
 
+It ships three nodes: the main **IBM Quantum** action node and two polling triggers (**IBM Quantum Trigger** and **IBM Quantum Error Trigger**).
+
+<p align="center">
+  <img src=".github/images/IBM%20Quantum%20-%20Trigger%20Picker.png" alt="IBM Quantum trigger and error-trigger nodes shown in the n8n trigger picker" width="460">
+</p>
+<p align="center"><sub>Both trigger nodes appear in the n8n trigger picker.</sub></p>
+
+<p align="center">
+  <img src=".github/images/IBM%20Quantum%20-%20Actions%20A.png" alt="IBM Quantum node details listing the trigger and the Account and Backend actions" width="330">
+  <img src=".github/images/IBM%20Quantum%20-%20Actions%20B.png" alt="IBM Quantum node details listing the Circuit, Job and Session actions" width="330">
+</p>
+<p align="center"><sub>All five resources and their operations in the node's action list.</sub></p>
+
 ## Architecture
 
 The node is a thin REST wrapper with no runtime dependencies. It does not bundle Qiskit or any quantum library. Circuits are expressed as OpenQASM 3 strings, either built by the node from a gate list or passed in directly. The IBM Cloud API key is exchanged for a short-lived IAM bearer token, which n8n caches and refreshes automatically.
@@ -83,7 +96,7 @@ Real hardware jobs can spend a long time in the queue, sometimes minutes to hour
 - One workflow submits the job and finishes immediately with the `jobId`. Nothing blocks.
 - A second, **active** workflow starts with the IBM Quantum Trigger. It polls IBM in the background (the n8n scheduler, not a held-open execution) and fires only when a job reaches a terminal state. Its Get Results then returns at once, because the job is already finished.
 
-So polling still happens, but in the background instead of inside a 10-minute blocking node. Use Get Results directly for short jobs and simulators; use Submit plus the trigger for long hardware runs.
+So polling still happens, but in the background instead of inside a blocking node held open for the whole Max Wait window (300 seconds by default). Use Get Results directly for short jobs and simulators; use Submit plus the trigger for long hardware runs.
 
 <p align="center">
   <img src=".github/images/IBM%20Quantum%20-%20Workflow%20B.png" alt="IBM Quantum Trigger firing on job completion, then Get Results returning measurement counts" width="720">
@@ -222,11 +235,11 @@ npm run build
 npm test
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow and [CHANGELOG.md](CHANGELOG.md) for release notes.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. Release history lives in the Git commit log and the GitHub Releases page.
 
 ## Releasing
 
-Releases publish to npm with provenance through the `publish.yml` GitHub Actions workflow when a GitHub release is created, using an npm trusted publisher so no long-lived token is stored. The package version must match the release tag.
+Releases publish to npm with provenance through the `publish.yml` GitHub Actions workflow when a GitHub release is created. Authentication uses an npm automation token stored as the `NPM_TOKEN` repository secret; provenance still works because the repo is public and the job has `id-token: write`. The package version must match the release tag.
 
 ## Notes on the live API
 
