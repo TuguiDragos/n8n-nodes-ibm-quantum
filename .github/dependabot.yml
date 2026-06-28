@@ -5,7 +5,35 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    # Batch minor and patch bumps into a single PR to cut review noise.
+    groups:
+      npm-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    # Major bumps of the toolchain need manual compatibility work and currently break CI:
+    # typescript-eslint must support the TS major, the n8n eslint plugin pins eslint 9, and
+    # vitest plus its coverage plugin must move together. Do not auto-propose them.
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
+      - dependency-name: vitest
+        update-types: [version-update:semver-major]
+      - dependency-name: "@vitest/coverage-v8"
+        update-types: [version-update:semver-major]
+      # The node targets the n8n v2 line; a v3 major is a deliberate, manual migration.
+      - dependency-name: n8n-workflow
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    # One grouped PR for all GitHub Actions bumps instead of one per action.
+    groups:
+      github-actions:
+        patterns:
+          - "*"
