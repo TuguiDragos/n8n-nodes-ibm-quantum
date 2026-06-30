@@ -5,10 +5,13 @@
 <p align="center">
   <a href="https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/actions/workflows/ci.yml"><img src="https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/n8n-nodes-ibm-quantum"><img src="https://img.shields.io/npm/v/n8n-nodes-ibm-quantum?style=flat&logo=npm&logoColor=white&color=CB3837" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/n8n-nodes-ibm-quantum"><img src="https://img.shields.io/badge/n8n-verified%20community%20node-EA4B71?style=flat&logo=n8n&logoColor=white" alt="Verified n8n community node"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2E7D32?style=flat" alt="License: MIT"></a>
 </p>
 
 <p align="center"><sub>Unofficial, community-maintained node. Not affiliated with, endorsed by, or sponsored by IBM. IBM Quantum and Qiskit are trademarks of International Business Machines Corporation.</sub></p>
+
+<p align="center"><sub>Verified by n8n, so it installs on n8n Cloud as well as self-hosted.</sub></p>
 
 ## What it does
 
@@ -35,13 +38,18 @@ It ships three nodes: the main **IBM Quantum** action node and two polling trigg
 </p>
 <p align="center"><sub>All five resources and their operations in the node's action list.</sub></p>
 
+## Articles
+
+- [My IBM Quantum node for n8n is now live](https://tuguidragos.com/ibm-quantum-node-for-n8n/) — the launch, the n8n verification, and what the three nodes do.
+- [Running Quantum Circuits on Real IBM Hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/) — an end-to-end Bell state on a real QPU (ibm_kingston), including the transpilation step that trips up most first attempts.
+
 ## Architecture
 
 The node is a thin REST wrapper with no runtime dependencies. It does not bundle Qiskit or any quantum library. Circuits are expressed as OpenQASM 3 strings, either built by the node from a gate list or passed in directly. The IBM Cloud API key is exchanged for a short-lived IAM bearer token, which n8n caches and refreshes automatically.
 
 ## Installation
 
-On self-hosted n8n, open the community nodes screen and enter the package name `n8n-nodes-ibm-quantum`. Once the package is verified by n8n it also becomes installable on n8n Cloud.
+On self-hosted n8n, open the community nodes screen and enter the package name `n8n-nodes-ibm-quantum`. It is verified by n8n, so it is also installable directly on n8n Cloud.
 
 ## Prerequisites
 
