@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-ibm-quantum",
-  "version": "0.1.1",
+  "version": "0.2.2",
   "description": "n8n community node to build, submit and retrieve quantum circuits on the IBM Quantum Platform, with triggers for asynchronous job completion and failure handling",
   "keywords": [
     "n8n-community-node-package",
@@ -64,11 +64,11 @@
     "n8n-workflow": "*"
   },
   "devDependencies": {
-    "@n8n/eslint-plugin-community-nodes": "^0.21.0",
-    "@types/node": "^26.0.1",
+    "@n8n/eslint-plugin-community-nodes": "^0.24.0",
+    "@types/node": "^22.20.0",
     "@vitest/coverage-v8": "^3.2.0",
     "eslint": "^9.29.0",
-    "n8n-workflow": "^2.16.0",
+    "n8n-workflow": "2.29.2",
     "prettier": "^3.3.3",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.0.0",

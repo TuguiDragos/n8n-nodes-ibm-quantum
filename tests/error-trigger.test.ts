@@ -39,7 +39,7 @@ describe('extractStateError', () => {
 	it('pulls the reason, code and solution from the job state', () => {
 		const job = {
 			id: 'job-1',
-			backend: 'ibm_brisbane',
+			backend: 'ibm_kingston',
 			state: {
 				status: 'Failed',
 				reason: 'Hardware calibration in progress',
@@ -49,7 +49,7 @@ describe('extractStateError', () => {
 		};
 		expect(extractStateError(job)).toEqual({
 			jobId: 'job-1',
-			backend: 'ibm_brisbane',
+			backend: 'ibm_kingston',
 			status: 'failed',
 			reason: 'Hardware calibration in progress',
 			reasonCode: 1517,
@@ -71,8 +71,9 @@ type ErrorJob = Record<string, unknown>;
 type PollResult = Array<Array<{ json: Record<string, unknown> }>> | null;
 
 function makeErrorContext(jobs: ErrorJob[], errorFilter = 'any', mode: 'trigger' | 'manual' = 'manual') {
+	const defaults: Record<string, unknown> = { errorFilter, tagFilter: '', limit: 20 };
 	return {
-		getNodeParameter: (name: string) => (name === 'errorFilter' ? errorFilter : 20),
+		getNodeParameter: (name: string) => defaults[name],
 		getCredentials: async () => ({ region: 'us-east' }),
 		getMode: () => mode,
 		getNode: () => ({ name: 'IBM Quantum Error Trigger' }),
@@ -89,7 +90,7 @@ const errorPoll = (ctx: unknown) =>
 
 const failedJob = {
 	id: 'e1',
-	backend: 'ibm_brisbane',
+	backend: 'ibm_kingston',
 	state: { status: 'Failed', reason: 'Calibration in progress', reason_code: 1517, reason_solution: 'Resubmit' },
 };
 
@@ -98,7 +99,7 @@ describe('IbmQuantumErrorTrigger.poll wiring (TEST-08)', () => {
 		const result = await errorPoll(makeErrorContext([failedJob]));
 		expect(result![0][0].json).toMatchObject({
 			jobId: 'e1',
-			backend: 'ibm_brisbane',
+			backend: 'ibm_kingston',
 			status: 'failed',
 			reason: 'Calibration in progress',
 			reasonCode: 1517,
@@ -121,8 +122,9 @@ describe('IbmQuantumErrorTrigger.poll wiring (TEST-08)', () => {
 		// Re-implement a tiny stateful context so the cursor persists across two polls.
 		const staticData: Record<string, unknown> = {};
 		let jobs: ErrorJob[] = [{ id: 'old', state: { status: 'Completed' } }];
+		const defaults: Record<string, unknown> = { errorFilter: 'any', tagFilter: '', limit: 20 };
 		const ctx = {
-			getNodeParameter: (name: string) => (name === 'errorFilter' ? 'any' : 20),
+			getNodeParameter: (name: string) => defaults[name],
 			getCredentials: async () => ({ region: 'us-east' }),
 			getMode: () => 'trigger',
 			getNode: () => ({ name: 'IBM Quantum Error Trigger' }),

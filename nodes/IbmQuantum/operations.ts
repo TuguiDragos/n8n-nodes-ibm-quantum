@@ -1,18 +1,15 @@
 import {
+	NodeApiError,
 	NodeOperationError,
 	sleep,
 	type IDataObject,
 	type IExecuteFunctions,
 	type INode,
+	type JsonObject,
 } from 'n8n-workflow';
 
 import { ibmQuantumApiRequest, type RequestContext } from './transport';
-import {
-	buildQasm3,
-	parseNumberListStrict,
-	validateGateInput,
-	type GateOperation,
-} from './qasm3';
+import { buildQasm3, parseNumberListStrict, validateGateInput, type GateOperation } from './qasm3';
 import { parseResults } from './results';
 
 const CONTROLLED_TWO = new Set(['cx', 'cz', 'crx', 'cry', 'crz']);
@@ -22,18 +19,54 @@ function mapGate(gate: string, qubits: number[], params: number[], clbit?: numbe
 	if (gate === 'measure') return { gate, targets: [qubits[0]], controls: [], params: [], clbit };
 	if (gate === 'swap') return { gate, targets: [qubits[0], qubits[1]], controls: [], params: [] };
 	if (gate === 'ccx') {
-		return { gate, targets: [qubits[qubits.length - 1]], controls: qubits.slice(0, -1), params: [] };
+		return {
+			gate,
+			targets: [qubits[qubits.length - 1]],
+			controls: qubits.slice(0, -1),
+			params: [],
+		};
 	}
-	if (CONTROLLED_TWO.has(gate)) return { gate, targets: [qubits[1]], controls: [qubits[0]], params };
+	if (CONTROLLED_TWO.has(gate))
+		return { gate, targets: [qubits[1]], controls: [qubits[0]], params };
 	return { gate, targets: qubits, controls: [], params };
 }
 
+// The UI minimum is only a hint. An expression can inject any value, so validate register
+// sizes here and fail with a clear message instead of emitting an invalid program.
+function requireRegisterSize(
+	value: unknown,
+	min: number,
+	label: string,
+	node: INode,
+	itemIndex: number,
+): number {
+	const n = Number(value);
+	if (!Number.isInteger(n) || n < min) {
+		throw new NodeOperationError(node, `${label} must be an integer of at least ${min}.`, {
+			itemIndex,
+		});
+	}
+	return n;
+}
+
 export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): IDataObject {
-	const numQubits = this.getNodeParameter('numQubits', itemIndex) as number;
-	const numClbits = this.getNodeParameter('numClbits', itemIndex) as number;
+	const node = this.getNode();
+	const numQubits = requireRegisterSize(
+		this.getNodeParameter('numQubits', itemIndex),
+		1,
+		'Number of Qubits',
+		node,
+		itemIndex,
+	);
+	const numClbits = requireRegisterSize(
+		this.getNodeParameter('numClbits', itemIndex, 0),
+		0,
+		'Number of Classical Bits',
+		node,
+		itemIndex,
+	);
 	const gatesParam = this.getNodeParameter('gates', itemIndex, {}) as IDataObject;
 	const rawGates = (gatesParam.gate as IDataObject[]) ?? [];
-	const node = this.getNode();
 
 	const gates = rawGates.map((raw, idx) => {
 		const gate = raw.gate as string;
@@ -104,7 +137,10 @@ async function getLeastBusy(
 			if (!includeSimulators && device.is_simulator === true) return false;
 			// A device with an unknown qubit count cannot be proven to meet the minimum, so exclude it
 			// rather than fail open and return a backend that may be smaller than the user asked for.
-			if (minQubits > 0 && (typeof device.qubits !== 'number' || (device.qubits as number) < minQubits)) {
+			if (
+				minQubits > 0 &&
+				(typeof device.qubits !== 'number' || (device.qubits as number) < minQubits)
+			) {
 				return false;
 			}
 			return statusName(device) === 'online';
@@ -139,7 +175,13 @@ export async function handleBackend(
 		getProperties: `/backends/${backendName}/properties`,
 		getStatus: `/backends/${backendName}/status`,
 	};
-	return ibmQuantumApiRequest.call(this, ctx, 'GET', endpoints[operation]);
+	const endpoint = endpoints[operation];
+	if (!endpoint) {
+		throw new NodeOperationError(this.getNode(), `Unsupported backend operation: ${operation}`, {
+			itemIndex,
+		});
+	}
+	return ibmQuantumApiRequest.call(this, ctx, 'GET', endpoint);
 }
 
 function parseJsonParameter(value: string, node: INode, label: string, itemIndex: number): unknown {
@@ -221,8 +263,17 @@ export function buildPubData(
 }
 
 function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDataObject {
-	const additionalOptionsRaw = this.getNodeParameter('additionalOptions', itemIndex, '{}') as string;
-	const parsed = parseJsonParameter(additionalOptionsRaw, this.getNode(), 'Additional Options', itemIndex);
+	const additionalOptionsRaw = this.getNodeParameter(
+		'additionalOptions',
+		itemIndex,
+		'{}',
+	) as string;
+	const parsed = parseJsonParameter(
+		additionalOptionsRaw,
+		this.getNode(),
+		'Additional Options',
+		itemIndex,
+	);
 	// An array or scalar would be spread into options as numeric-index keys and rejected by IBM, so
 	// reject it inline with a clear message instead of sending a corrupt request. null means "no options".
 	if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
@@ -232,8 +283,7 @@ function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDat
 			{ itemIndex },
 		);
 	}
-	const base: IDataObject =
-		parsed && typeof parsed === 'object' ? (parsed as IDataObject) : {};
+	const base: IDataObject = parsed && typeof parsed === 'object' ? (parsed as IDataObject) : {};
 	return mergePrimitiveOptions(
 		base,
 		this.getNodeParameter('dynamicalDecoupling', itemIndex, false) as boolean,
@@ -271,7 +321,12 @@ async function submitJob(
 	let pub: unknown[];
 	if (primitive === 'estimator') {
 		const observablesRaw = this.getNodeParameter('observables', itemIndex) as string;
-		const observables = parseJsonParameter(observablesRaw, this.getNode(), 'Observables', itemIndex);
+		const observables = parseJsonParameter(
+			observablesRaw,
+			this.getNode(),
+			'Observables',
+			itemIndex,
+		);
 		validateObservables(observables, this.getNode(), itemIndex);
 		params.resilience_level = this.getNodeParameter('resilienceLevel', itemIndex, 1) as number;
 		const precision = this.getNodeParameter('precision', itemIndex, 0) as number;
@@ -287,9 +342,22 @@ async function submitJob(
 	const body: IDataObject = { program_id: primitive, backend, params };
 	// session_id is a sibling of program_id/backend/params, never inside params.
 	if (sessionId) body.session_id = sessionId;
+	const tags = parseTagList(this.getNodeParameter('jobTags', itemIndex, '') as string);
+	if (tags.length > 0) body.tags = tags;
+	// The API expects the private flag only when set, matching the official client.
+	if (this.getNodeParameter('privateJob', itemIndex, false) === true) body.private = true;
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
 	return { jobId: response.id ?? null, backend, primitive, sessionId: sessionId || null, response };
+}
+
+// Split a comma-separated tag input into clean tag strings.
+export function parseTagList(value: unknown): string[] {
+	if (typeof value !== 'string' || !value.trim()) return [];
+	return value
+		.split(',')
+		.map((tag) => tag.trim())
+		.filter((tag) => tag !== '');
 }
 
 // IBM V2 terminal statuses are completed, canceled and failed. The British spelling and 'error'
@@ -323,6 +391,43 @@ function clampSeconds(value: unknown, fallback: number): number {
 	return Number.isFinite(n) && n >= 1 ? n : fallback;
 }
 
+// Connection-level failures that are safe to retry while polling.
+const TRANSIENT_NETWORK_CODES = new Set([
+	'ECONNABORTED',
+	'ECONNREFUSED',
+	'ECONNRESET',
+	'EAI_AGAIN',
+	'EPIPE',
+	'ETIMEDOUT',
+]);
+
+function firstHttpStatus(err: {
+	httpCode?: string | number;
+	statusCode?: number;
+	response?: { status?: number };
+	cause?: { httpCode?: string | number; statusCode?: number; response?: { status?: number } };
+}): number {
+	const raw =
+		err.httpCode ??
+		err.statusCode ??
+		err.response?.status ??
+		err.cause?.httpCode ??
+		err.cause?.statusCode ??
+		err.cause?.response?.status;
+	return Number(raw);
+}
+
+// A poll iteration should survive rate limits, gateway errors and dropped connections.
+// Anything else (bad job id, revoked key, malformed request) keeps failing fast.
+export function isTransientPollError(error: unknown): boolean {
+	if (!error || typeof error !== 'object') return false;
+	const err = error as Parameters<typeof firstHttpStatus>[0] & { cause?: { code?: string } };
+	const status = firstHttpStatus(err);
+	if (Number.isFinite(status) && status > 0) return status === 429 || status >= 500;
+	const code = err.cause?.code;
+	return typeof code === 'string' && TRANSIENT_NETWORK_CODES.has(code);
+}
+
 async function getResults(
 	this: IExecuteFunctions,
 	ctx: RequestContext,
@@ -338,8 +443,24 @@ async function getResults(
 	let jobInfo: IDataObject = {};
 
 	// Poll at least once, break on a terminal status, and never sleep past the deadline.
+	// A transient failure (429, 5xx, dropped connection) retries until the deadline instead
+	// of killing a poll that may already have waited many minutes.
 	while (true) {
-		jobInfo = await ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}`);
+		try {
+			jobInfo = await ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}`);
+		} catch (error) {
+			const remaining = deadline - Date.now();
+			if (remaining <= 0 || !isTransientPollError(error)) {
+				// Requests arrive here already wrapped by ibmQuantumApiRequest; wrap anything else.
+				const wrapped =
+					error instanceof NodeApiError || error instanceof NodeOperationError
+						? error
+						: new NodeApiError(this.getNode(), error as JsonObject, { itemIndex });
+				throw wrapped;
+			}
+			await sleep(Math.min(intervalSec * 1000, remaining));
+			continue;
+		}
 		status = extractJobStatus(jobInfo);
 		if (isTerminalStatus(status)) break;
 		const remaining = deadline - Date.now();
@@ -366,17 +487,65 @@ export async function handleJob(
 	if (operation === 'getResults') return getResults.call(this, ctx, itemIndex);
 	if (operation === 'list') {
 		const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
-		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/jobs', undefined, { limit });
+		const filters = this.getNodeParameter('listFilters', itemIndex, {}) as IDataObject;
+		// exclude_params drops each job's circuit payload from the listing, matching the
+		// official client's default. The filter toggle brings it back when needed.
+		const qs: IDataObject = { limit, exclude_params: filters.includeParams !== true };
+		const stringFilters: Array<[string, string]> = [
+			['backend', 'backend'],
+			['sessionId', 'session_id'],
+			['tag', 'tags'],
+			['createdAfter', 'created_after'],
+			['createdBefore', 'created_before'],
+		];
+		for (const [param, qsKey] of stringFilters) {
+			const value = filters[param];
+			if (typeof value === 'string' && value.trim() !== '') qs[qsKey] = value.trim();
+		}
+		if (filters.pending === 'pending') qs.pending = true;
+		else if (filters.pending === 'finished') qs.pending = false;
+		if (filters.sort === 'asc') qs.sort = 'ASC';
+		const offset = Number(filters.offset);
+		if (Number.isInteger(offset) && offset > 0) qs.offset = offset;
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/jobs', undefined, qs);
 	}
 
 	const jobId = this.getNodeParameter('jobId', itemIndex) as string;
-	if (operation === 'getStatus') return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}`);
+	if (operation === 'getStatus')
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}`);
+	if (operation === 'getMetrics') {
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}/metrics`);
+	}
+	if (operation === 'getLogs') {
+		// The logs endpoint returns plain text, not JSON, so wrap it for a structured item.
+		const response = (await ibmQuantumApiRequest.call(
+			this,
+			ctx,
+			'GET',
+			`/jobs/${jobId}/logs`,
+		)) as unknown;
+		const logs = typeof response === 'string' ? response : ((response as IDataObject) ?? '');
+		return { jobId, logs };
+	}
+	if (operation === 'updateTags') {
+		const tags = parseTagList(this.getNodeParameter('jobTags', itemIndex, '') as string);
+		// PUT replaces the full tag list and returns 204, so an empty input clears all tags.
+		await ibmQuantumApiRequest.call(this, ctx, 'PUT', `/jobs/${jobId}/tags`, { tags });
+		return { jobId, tags };
+	}
 	if (operation === 'cancel') {
 		await ibmQuantumApiRequest.call(this, ctx, 'POST', `/jobs/${jobId}/cancel`);
 		return { jobId, cancelled: true };
 	}
-	await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/jobs/${jobId}`);
-	return { jobId, deleted: true };
+	// Destructive requests only run on an exact match. An unknown operation must fail loudly
+	// instead of falling through to a delete.
+	if (operation === 'delete') {
+		await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/jobs/${jobId}`);
+		return { jobId, deleted: true };
+	}
+	throw new NodeOperationError(this.getNode(), `Unsupported job operation: ${operation}`, {
+		itemIndex,
+	});
 }
 
 export async function handleSession(
@@ -407,9 +576,15 @@ export async function handleSession(
 		});
 		return { sessionId, acceptingJobs };
 	}
-	// close: DELETE returns 204 with no body.
-	await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/sessions/${sessionId}/close`);
-	return { sessionId, closed: true };
+	// close: DELETE returns 204 with no body. Exact match only, so an unknown operation
+	// cannot close a session by accident.
+	if (operation === 'close') {
+		await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/sessions/${sessionId}/close`);
+		return { sessionId, closed: true };
+	}
+	throw new NodeOperationError(this.getNode(), `Unsupported session operation: ${operation}`, {
+		itemIndex,
+	});
 }
 
 export async function handleAccount(
@@ -420,6 +595,11 @@ export async function handleAccount(
 	if (operation === 'getUsage') {
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/usage');
 	}
-	// getInstance
-	return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instance');
+	if (operation === 'getConfiguration') {
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/configuration');
+	}
+	if (operation === 'getInstance') {
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instance');
+	}
+	throw new NodeOperationError(this.getNode(), `Unsupported account operation: ${operation}`);
 }

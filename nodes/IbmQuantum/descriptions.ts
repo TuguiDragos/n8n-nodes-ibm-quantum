@@ -52,6 +52,11 @@ export const nodeProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['account'] } },
 		options: [
+			{
+				name: 'Get Configuration',
+				value: 'getConfiguration',
+				action: 'Get the instance configuration',
+			},
 			{ name: 'Get Instance', value: 'getInstance', action: 'Get the current instance details' },
 			{ name: 'Get Usage', value: 'getUsage', action: 'Get instance usage and allocation' },
 		],
@@ -82,7 +87,11 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['circuit'] } },
 		options: [
 			{ name: 'Build', value: 'build', action: 'Build a circuit from gates' },
-			{ name: 'Import OpenQASM 3', value: 'import', action: 'Import an existing OpenQASM 3 circuit' },
+			{
+				name: 'Import OpenQASM 3',
+				value: 'import',
+				action: 'Import an existing OpenQASM 3 circuit',
+			},
 		],
 		default: 'build',
 	},
@@ -96,11 +105,26 @@ export const nodeProperties: INodeProperties[] = [
 		options: [
 			{ name: 'Cancel', value: 'cancel', action: 'Cancel a job' },
 			{ name: 'Delete', value: 'delete', action: 'Delete a job' },
-			{ name: 'Get Results', value: 'getResults', action: 'Poll until the job finishes, then retrieve its results' },
+			{ name: 'Get Logs', value: 'getLogs', action: 'Get the logs of a job' },
+			{ name: 'Get Metrics', value: 'getMetrics', action: 'Get timing and usage metrics of a job' },
+			{
+				name: 'Get Results',
+				value: 'getResults',
+				action: 'Poll until the job finishes, then retrieve its results',
+			},
 			{ name: 'Get Status', value: 'getStatus', action: 'Get the status of a job' },
 			{ name: 'List', value: 'list', action: 'List recent jobs' },
-			{ name: 'Submit to Estimator', value: 'submitEstimator', action: 'Submit a circuit to the Estimator primitive' },
-			{ name: 'Submit to Sampler', value: 'submitSampler', action: 'Submit a circuit to the Sampler primitive' },
+			{
+				name: 'Submit to Estimator',
+				value: 'submitEstimator',
+				action: 'Submit a circuit to the Estimator primitive',
+			},
+			{
+				name: 'Submit to Sampler',
+				value: 'submitSampler',
+				action: 'Submit a circuit to the Sampler primitive',
+			},
+			{ name: 'Update Tags', value: 'updateTags', action: 'Replace the tags of a job' },
 		],
 		default: 'submitSampler',
 	},
@@ -115,7 +139,11 @@ export const nodeProperties: INodeProperties[] = [
 			{ name: 'Close', value: 'close', action: 'Close a session' },
 			{ name: 'Create', value: 'create', action: 'Create a session or batch' },
 			{ name: 'Get', value: 'get', action: 'Get a session' },
-			{ name: 'Set Accepting Jobs', value: 'setAccepting', action: 'Set whether the session accepts new jobs' },
+			{
+				name: 'Set Accepting Jobs',
+				value: 'setAccepting',
+				action: 'Set whether the session accepts new jobs',
+			},
 		],
 		default: 'create',
 	},
@@ -126,11 +154,14 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'string',
 		required: true,
 		default: '',
-		placeholder: 'ibm_brisbane',
+		placeholder: 'ibm_kingston',
 		description:
-			'Name of the backend (a specific quantum device or simulator) to query, e.g. ibm_brisbane. Use the Backend List operation to see available names.',
+			'Name of the backend (a specific quantum device or simulator) to query, e.g. ibm_kingston. Use the Backend List operation to see available names.',
 		displayOptions: {
-			show: { resource: ['backend'], operation: ['getConfiguration', 'getProperties', 'getStatus'] },
+			show: {
+				resource: ['backend'],
+				operation: ['getConfiguration', 'getProperties', 'getStatus'],
+			},
 		},
 	},
 	{
@@ -242,8 +273,9 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'string',
 		required: true,
 		default: '',
-		placeholder: 'ibm_brisbane',
-		description: 'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits.',
+		placeholder: 'ibm_kingston',
+		description:
+			'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 	{
@@ -253,7 +285,8 @@ export const nodeProperties: INodeProperties[] = [
 		typeOptions: { rows: 8 },
 		required: true,
 		default: '',
-		description: 'Circuit to submit, as an ISA (backend-native) OpenQASM 3 string. Use an expression to reference a Circuit node output.',
+		description:
+			'Circuit to submit, as an ISA (backend-native) OpenQASM 3 string. Use an expression to reference a Circuit node output.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 	{
@@ -294,7 +327,8 @@ export const nodeProperties: INodeProperties[] = [
 			{ name: '2 (Medium)', value: 2 },
 		],
 		default: 1,
-		description: 'Error mitigation level applied by the Estimator. Higher levels reduce noise at the cost of more runtime.',
+		description:
+			'Error mitigation level applied by the Estimator. Higher levels reduce noise at the cost of more runtime.',
 		displayOptions: { show: { resource: ['job'], operation: ['submitEstimator'] } },
 	},
 	{
@@ -340,6 +374,25 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 	{
+		displayName: 'Tags',
+		name: 'jobTags',
+		type: 'string',
+		default: '',
+		placeholder: 'experiment-7, vqe',
+		description:
+			'Comma-separated tags stored on the job. Jobs can then be filtered by tag in the List operation and the triggers. On Update Tags an empty value clears all tags.',
+		displayOptions: { show: { resource: ['job'], operation: [...SUBMIT_OPS, 'updateTags'] } },
+	},
+	{
+		displayName: 'Private',
+		name: 'privateJob',
+		type: 'boolean',
+		default: false,
+		description:
+			'Whether to mark the job private, hiding its input and results from other collaborators on the instance. Requires a plan that supports private jobs.',
+		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
+	},
+	{
 		displayName: 'Additional Options',
 		name: 'additionalOptions',
 		type: 'json',
@@ -358,7 +411,18 @@ export const nodeProperties: INodeProperties[] = [
 		description:
 			'ID of the job to act on, as returned by the Submit operation. Usually set with an expression referencing a previous IBM Quantum node.',
 		displayOptions: {
-			show: { resource: ['job'], operation: ['getStatus', 'getResults', 'cancel', 'delete'] },
+			show: {
+				resource: ['job'],
+				operation: [
+					'getStatus',
+					'getResults',
+					'getLogs',
+					'getMetrics',
+					'updateTags',
+					'cancel',
+					'delete',
+				],
+			},
 		},
 	},
 	{
@@ -385,7 +449,8 @@ export const nodeProperties: INodeProperties[] = [
 		name: 'registerName',
 		type: 'string',
 		default: '',
-		description: 'Optional classical register name to read counts from. Detected automatically when empty.',
+		description:
+			'Optional classical register name to read counts from. Detected automatically when empty.',
 		displayOptions: { show: { resource: ['job'], operation: ['getResults'] } },
 	},
 	{
@@ -396,6 +461,90 @@ export const nodeProperties: INodeProperties[] = [
 		default: 50,
 		description: 'Max number of results to return',
 		displayOptions: { show: { resource: ['job'], operation: ['list'] } },
+	},
+	{
+		displayName: 'Filters',
+		name: 'listFilters',
+		type: 'collection',
+		placeholder: 'Add Filter',
+		default: {},
+		displayOptions: { show: { resource: ['job'], operation: ['list'] } },
+		options: [
+			{
+				displayName: 'Backend',
+				name: 'backend',
+				type: 'string',
+				default: '',
+				description: 'Only jobs that ran on this backend',
+			},
+			{
+				displayName: 'Created After',
+				name: 'createdAfter',
+				type: 'dateTime',
+				default: '',
+				description: 'Only jobs created after this time',
+			},
+			{
+				displayName: 'Created Before',
+				name: 'createdBefore',
+				type: 'dateTime',
+				default: '',
+				description: 'Only jobs created before this time',
+			},
+			{
+				displayName: 'Include Circuit Params',
+				name: 'includeParams',
+				type: 'boolean',
+				default: false,
+				description:
+					"Whether to include each job's full submitted params (the circuit) in the response. Off keeps the listing small.",
+			},
+			{
+				displayName: 'Offset',
+				name: 'offset',
+				type: 'number',
+				typeOptions: { minValue: 0 },
+				default: 0,
+				description: 'Number of jobs to skip, for paging through older jobs',
+			},
+			{
+				displayName: 'Session ID',
+				name: 'sessionId',
+				type: 'string',
+				default: '',
+				description: 'Only jobs that ran inside this session or batch',
+			},
+			{
+				displayName: 'Sort',
+				name: 'sort',
+				type: 'options',
+				options: [
+					{ name: 'Newest First', value: 'desc' },
+					{ name: 'Oldest First', value: 'asc' },
+				],
+				default: 'desc',
+				description: 'Order of the returned jobs',
+			},
+			{
+				displayName: 'Status',
+				name: 'pending',
+				type: 'options',
+				options: [
+					{ name: 'All', value: 'all' },
+					{ name: 'Only Finished', value: 'finished' },
+					{ name: 'Only Pending', value: 'pending' },
+				],
+				default: 'all',
+				description: 'Keep all jobs, only finished ones, or only queued and running ones',
+			},
+			{
+				displayName: 'Tag',
+				name: 'tag',
+				type: 'string',
+				default: '',
+				description: 'Only jobs carrying this tag',
+			},
+		],
 	},
 
 	{
@@ -417,7 +566,7 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'string',
 		required: true,
 		default: '',
-		placeholder: 'ibm_brisbane',
+		placeholder: 'ibm_kingston',
 		description: 'Backend the session reserves for its jobs',
 		displayOptions: { show: { resource: ['session'], operation: ['create'] } },
 	},
@@ -437,7 +586,9 @@ export const nodeProperties: INodeProperties[] = [
 		required: true,
 		default: '',
 		description: 'ID of the session, as returned by Session Create',
-		displayOptions: { show: { resource: ['session'], operation: ['get', 'setAccepting', 'close'] } },
+		displayOptions: {
+			show: { resource: ['session'], operation: ['get', 'setAccepting', 'close'] },
+		},
 	},
 	{
 		displayName: 'Accepting Jobs',

@@ -21,9 +21,9 @@ The node groups its work into five resources.
 | --- | --- |
 | Backend | List, Get Configuration, Get Properties, Get Status, Get Least Busy |
 | Circuit | Build (from a gate list), Import OpenQASM 3 |
-| Job | Submit to Sampler, Submit to Estimator, Get Status, Get Results, List, Cancel, Delete |
+| Job | Submit to Sampler, Submit to Estimator, Get Status, Get Results, Get Logs, Get Metrics, List (with filters), Update Tags, Cancel, Delete |
 | Session | Create (batch or dedicated), Get, Set Accepting Jobs, Close |
-| Account | Get Usage, Get Instance |
+| Account | Get Usage, Get Instance, Get Configuration |
 
 It ships three nodes: the main **IBM Quantum** action node and two polling triggers (**IBM Quantum Trigger** and **IBM Quantum Error Trigger**).
 
@@ -111,7 +111,7 @@ So polling still happens, but in the background instead of inside a blocking nod
 </p>
 <p align="center"><sub>The IBM Quantum Trigger fires when the job finishes, and Get Results returns the measurement counts at once.</sub></p>
 
-IBM does not push notifications, so the trigger polls. Set the interval with the built-in Poll Times field, and choose which terminal status should fire it. The trigger only polls while its workflow is **active** (toggle Active); for a one-off test use Fetch Test Event.
+IBM does not push notifications, so the trigger polls. Set the interval with the built-in Poll Times field, and choose which terminal status should fire it. The trigger only polls while its workflow is **active** (toggle Active); for a one-off test use Fetch Test Event. Each poll scans only finished jobs and skips the circuit payloads, so it stays light. If several workflows share one instance, set **Tags** on the Submit operation and the matching **Tag** filter on the trigger, so each workflow reacts only to its own jobs.
 
 For production, pair it with the **IBM Quantum Error Trigger**, which fires only when a job fails or is canceled (queue timeout, a calibration fault, or a manual cancel from the IBM dashboard). It emits the failure `reason`, `reasonCode` and `reasonSolution` from the job, so a second workflow can alert an engineer or fall back to a simulator instead of stalling.
 
@@ -148,6 +148,8 @@ The Submit operation is split per primitive, since their inputs differ:
 
 Both share error-suppression toggles that matter on real hardware: **Dynamical Decoupling**, **Gate Twirling** and **Measurement Twirling**. For parametrized circuits, set **Parameters** to a JSON object binding parameter names to values, e.g. `{"theta": 1.5708}`. **Additional Options** is a JSON escape hatch merged into the primitive `options`, for example `{"default_shots": 4096}`.
 
+Both Submit operations also accept **Tags** (comma separated, stored on the job and usable as a filter in Job List and in the triggers) and a **Private** toggle that hides the job's inputs and results from other collaborators on plans that support private jobs.
+
 ## Bit order
 
 Sampler counts follow the classical register order. The bit `c[0]` is the rightmost bit in each output bitstring, which matches the standard Qiskit convention.
@@ -171,7 +173,7 @@ This is not a node bug. The node builds, submits and reads the job correctly; th
 
 ### How to transpile (free, any plan)
 
-Transpile locally with Qiskit, then feed the ISA string into the node. You do not need live credentials: a fake backend carries the real topology and native gate set.
+Transpile locally with Qiskit, then feed the ISA string into the node. You do not need live credentials: a fake backend carries the real topology and native gate set. Current Qiskit (2.5+) requires Python with NumPy 2.0 or newer.
 
 ```python
 from qiskit import QuantumCircuit, qasm3
@@ -243,7 +245,7 @@ npm run build
 npm test
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. Release history lives in the Git commit log and the GitHub Releases page.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. Release history lives in [CHANGELOG.md](CHANGELOG.md) and the GitHub Releases page.
 
 ## Releasing
 

@@ -11,23 +11,27 @@ function makeContext(
 	jobsRef: { jobs: Job[] },
 	staticData: Record<string, unknown>,
 	mode: 'trigger' | 'manual' = 'trigger',
+	params: Record<string, unknown> = {},
 ) {
 	let httpCalls = 0;
+	const requests: Array<Record<string, unknown>> = [];
+	const defaults: Record<string, unknown> = { statusFilter: 'any', tagFilter: '', limit: 20 };
 	const ctx = {
-		getNodeParameter: (name: string) => (name === 'statusFilter' ? 'any' : 20),
+		getNodeParameter: (name: string) => (name in params ? params[name] : defaults[name]),
 		getCredentials: async () => ({ region: 'us-east' }),
 		getMode: () => mode,
 		getNode: () => ({ name: 'IBM Quantum Trigger' }),
 		getWorkflowStaticData: () => staticData,
 		helpers: {
-			httpRequestWithAuthentication: async () => {
+			httpRequestWithAuthentication: async (_cred: string, options: Record<string, unknown>) => {
 				httpCalls += 1;
+				requests.push(options);
 				return { jobs: jobsRef.jobs };
 			},
 			returnJsonArray: (data: Job[]) => data.map((json) => ({ json })),
 		},
 	};
-	return { ctx, httpCalls: () => httpCalls };
+	return { ctx, httpCalls: () => httpCalls, requests };
 }
 
 const poll = (ctx: unknown) =>
@@ -105,10 +109,25 @@ describe('IbmQuantumTrigger.poll deduplication', () => {
 	});
 });
 
+describe('IbmQuantumTrigger.poll query string', () => {
+	it('scans only finished jobs and drops circuit payloads', async () => {
+		const { ctx, requests } = makeContext({ jobs: [] }, {}, 'manual');
+		await poll(ctx);
+		expect(requests[0].qs).toEqual({ limit: 20, pending: false, exclude_params: true });
+	});
+
+	it('passes the tag filter through when set', async () => {
+		const { ctx, requests } = makeContext({ jobs: [] }, {}, 'manual', { tagFilter: ' vqe ' });
+		await poll(ctx);
+		expect(requests[0].qs).toEqual({ limit: 20, pending: false, exclude_params: true, tags: 'vqe' });
+	});
+});
+
 describe('IbmQuantumTrigger.poll response normalization (TEST-10)', () => {
 	function ctxWithResponse(response: unknown, mode: 'trigger' | 'manual' = 'manual') {
+		const defaults: Record<string, unknown> = { statusFilter: 'any', tagFilter: '', limit: 20 };
 		return {
-			getNodeParameter: (name: string) => (name === 'statusFilter' ? 'any' : 20),
+			getNodeParameter: (name: string) => defaults[name],
 			getCredentials: async () => ({ region: 'us-east' }),
 			getMode: () => mode,
 			getNode: () => ({ name: 'IBM Quantum Trigger' }),

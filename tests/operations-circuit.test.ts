@@ -35,6 +35,23 @@ describe('handleCircuitBuild gate mapping and ordering (TEST-06)', () => {
 	});
 });
 
+describe('handleCircuitBuild register size validation', () => {
+	it('rejects a zero or negative qubit count injected by expression', () => {
+		expect(() => build({ numQubits: 0, numClbits: 0, gates: {} })).toThrow(/Number of Qubits/);
+		expect(() => build({ numQubits: -3, numClbits: 0, gates: {} })).toThrow(/Number of Qubits/);
+	});
+
+	it('rejects non-integer register sizes', () => {
+		expect(() => build({ numQubits: 2.5, numClbits: 0, gates: {} })).toThrow(/Number of Qubits/);
+		expect(() => build({ numQubits: 2, numClbits: 1.5, gates: {} })).toThrow(/Number of Classical Bits/);
+		expect(() => build({ numQubits: NaN, numClbits: 0, gates: {} })).toThrow(/Number of Qubits/);
+	});
+
+	it('rejects a negative classical register', () => {
+		expect(() => build({ numQubits: 2, numClbits: -1, gates: {} })).toThrow(/Number of Classical Bits/);
+	});
+});
+
 describe('handleCircuitBuild validation errors (TEST-07)', () => {
 	it('indexes a validation failure by gate position', () => {
 		expect(() =>

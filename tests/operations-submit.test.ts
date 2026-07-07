@@ -7,7 +7,7 @@ const QASM = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nx q[0];';
 
 function submit(operation: 'submitSampler' | 'submitEstimator', params: Record<string, unknown>) {
 	const { ctx, requests } = makeExecuteContext({
-		params: { backend: 'ibm_brisbane', qasm3: QASM, ...params },
+		params: { backend: 'ibm_kingston', qasm3: QASM, ...params },
 		http: () => ({ id: 'job-123' }),
 	});
 	return handleJob.call(ctx, TEST_CTX, operation, 0).then((result) => ({
@@ -24,12 +24,12 @@ describe('submitJob request body (TEST-01)', () => {
 		expect(call.url).toBe(`${TEST_CTX.baseUrl}/jobs`);
 		expect(body).toEqual({
 			program_id: 'sampler',
-			backend: 'ibm_brisbane',
+			backend: 'ibm_kingston',
 			params: { version: 2, pubs: [[QASM, null, 512]] },
 		});
 		expect(body.session_id).toBeUndefined();
 		expect((body.params as Record<string, unknown>).options).toBeUndefined();
-		expect(result).toMatchObject({ jobId: 'job-123', backend: 'ibm_brisbane', primitive: 'sampler' });
+		expect(result).toMatchObject({ jobId: 'job-123', backend: 'ibm_kingston', primitive: 'sampler' });
 	});
 
 	it('builds a minimal Estimator body with resilience_level and a two-item PUB', async () => {
@@ -79,6 +79,16 @@ describe('submitJob request body (TEST-01)', () => {
 			default_shots: 4096,
 			twirling: { enable_gates: true },
 		});
+	});
+
+	it('sends cleaned tags and the private flag only when set', async () => {
+		const tagged = await submit('submitSampler', { jobTags: ' vqe , experiment-7,, ', privateJob: true });
+		expect(tagged.body.tags).toEqual(['vqe', 'experiment-7']);
+		expect(tagged.body.private).toBe(true);
+
+		const plain = await submit('submitSampler', {});
+		expect(plain.body.tags).toBeUndefined();
+		expect(plain.body.private).toBeUndefined();
 	});
 });
 

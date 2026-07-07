@@ -112,7 +112,8 @@ describe('buildQasm3', () => {
 		const lines = buildQasm3({ numQubits: 3, numClbits: 0, gates }).split('\n');
 
 		expect(lines).toContain('rx(1.5708) q[0];');
-		expect(lines).toContain('u(0.1, 0.2, 0.3) q[1];');
+		// Uppercase U: the builtin gate, since stdgates.inc has no lowercase u.
+		expect(lines).toContain('U(0.1, 0.2, 0.3) q[1];');
 		expect(lines).toContain('crx(0.5) q[0], q[1];');
 		expect(lines).toContain('ccx q[0], q[1], q[2];');
 		expect(lines).toContain('swap q[0], q[1];');

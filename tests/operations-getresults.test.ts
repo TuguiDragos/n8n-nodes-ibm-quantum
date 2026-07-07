@@ -114,4 +114,48 @@ describe('getResults polling loop (TEST-02)', () => {
 		// Falls back to the 300s default; the mocked sleep advances the clock so the loop terminates.
 		expect(result.timedOut).toBe(true);
 	});
+
+	it('retries a transient 502 during polling and still completes', async () => {
+		const { result, requests } = await getResults({}, (call, i) => {
+			if (isResults(call)) {
+				return { results: [{ data: { c: { samples: ['0x0'], num_bits: 1 } }, metadata: {} }] };
+			}
+			if (i === 0) throw { httpCode: '502', message: 'Bad gateway' };
+			return { state: { status: 'Completed' } };
+		});
+		expect(result.status).toBe('completed');
+		expect(requests.filter((call) => !isResults(call))).toHaveLength(2);
+	});
+
+	it('retries a 429 rate limit during polling', async () => {
+		const { result } = await getResults({}, (call, i) => {
+			if (isResults(call)) return { results: [] };
+			if (i === 0) throw { httpCode: 429, message: 'Too many requests' };
+			return { state: { status: 'Completed' } };
+		});
+		expect(result.status).toBe('completed');
+	});
+
+	it('fails fast on a non-transient error like 404', async () => {
+		let calls = 0;
+		await expect(
+			getResults({}, () => {
+				calls += 1;
+				throw { httpCode: '404', message: 'Job not found' };
+			}),
+		).rejects.toThrow();
+		expect(calls).toBe(1);
+	});
+
+	it('stops retrying once the deadline passes', async () => {
+		let calls = 0;
+		await expect(
+			getResults({ maxWait: 12, pollInterval: 5 }, () => {
+				calls += 1;
+				throw { httpCode: '503', message: 'Service unavailable' };
+			}),
+		).rejects.toThrow();
+		// 12s window, 5s interval: attempts at t=0, 5 and 10 retry, the t=12 attempt rethrows.
+		expect(calls).toBe(4);
+	});
 });
