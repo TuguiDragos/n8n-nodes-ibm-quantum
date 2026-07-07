@@ -143,7 +143,9 @@ function renderGate(op: GateOperation): string {
 		case 'ccx':
 			return `ccx ${q(controls[0])}, ${q(controls[1])}, ${q(targets[0])};`;
 		case 'u':
-			return `u(${fmt(params[0])}, ${fmt(params[1])}, ${fmt(params[2])}) ${q(targets[0])};`;
+			// Uppercase U is the OpenQASM 3 builtin unitary. stdgates.inc defines no lowercase u,
+			// so emitting "u(...)" would be an undefined gate and IBM's parser rejects the program.
+			return `U(${fmt(params[0])}, ${fmt(params[1])}, ${fmt(params[2])}) ${q(targets[0])};`;
 		default:
 			if (SINGLE_QUBIT.has(gate)) return `${gate} ${q(targets[0])};`;
 			if (SINGLE_QUBIT_PARAM.has(gate)) return `${gate}(${fmt(params[0])}) ${q(targets[0])};`;
@@ -155,11 +157,7 @@ function renderGate(op: GateOperation): string {
 }
 
 export function buildQasm3(circuit: CircuitDefinition): string {
-	const lines = [
-		'OPENQASM 3.0;',
-		'include "stdgates.inc";',
-		`qubit[${circuit.numQubits}] q;`,
-	];
+	const lines = ['OPENQASM 3.0;', 'include "stdgates.inc";', `qubit[${circuit.numQubits}] q;`];
 	if (circuit.numClbits > 0) lines.push(`bit[${circuit.numClbits}] c;`);
 	for (const op of circuit.gates) lines.push(renderGate(op));
 	return lines.join('\n');

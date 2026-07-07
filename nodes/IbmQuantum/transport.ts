@@ -83,8 +83,7 @@ export function extractIbmError(error: unknown): IbmErrorDetail | null {
 	} | null;
 	if (!err || typeof err !== 'object') return null;
 	const data = (err.context?.data ?? err.response?.data ?? err.cause?.response?.data) as
-		| { errors?: unknown; error?: unknown; message?: unknown }
-		| undefined;
+		{ errors?: unknown; error?: unknown; message?: unknown } | undefined;
 	if (!data || typeof data !== 'object') return null;
 
 	const list: Array<{ message?: unknown; solution?: unknown }> = Array.isArray(data.errors)
@@ -117,7 +116,9 @@ export function enrichApiError(node: INode, error: unknown): NodeApiError {
 	if (!ibm) {
 		return error instanceof NodeApiError ? error : new NodeApiError(node, error as JsonObject);
 	}
-	const options = ibm.solution ? { message: ibm.message, description: ibm.solution } : { message: ibm.message };
+	const options = ibm.solution
+		? { message: ibm.message, description: ibm.solution }
+		: { message: ibm.message };
 	// A same-module NodeApiError is returned unchanged by the constructor (options ignored), so
 	// set the fields directly; otherwise build a fresh one with the message option.
 	if (error instanceof NodeApiError) {

@@ -22,7 +22,8 @@ function iamFailureHint(error: unknown): string {
 	const code = err?.response?.data?.errorCode;
 	const parts: string[] = [];
 	if (status === 429) parts.push('rate limited by IBM IAM');
-	else if (status === 400 || status === 401 || status === 403) parts.push('the API key was rejected');
+	else if (status === 400 || status === 401 || status === 403)
+		parts.push('the API key was rejected');
 	else if (status >= 500) parts.push('IBM IAM is temporarily unavailable');
 	if (typeof code === 'string' && /^[A-Za-z0-9_-]{1,20}$/.test(code)) parts.push(`code ${code}`);
 	return parts.length ? ` (${parts.join(', ')})` : '';

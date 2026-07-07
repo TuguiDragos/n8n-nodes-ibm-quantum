@@ -63,7 +63,8 @@ export function parseResults(response: IDataObject, preferredRegister?: string):
 	const pubs = results.map((pub) => {
 		const data = (pub.data as IDataObject) ?? {};
 		const isSampler = Object.values(data).some(
-			(value) => value && typeof value === 'object' && Array.isArray((value as IDataObject).samples),
+			(value) =>
+				value && typeof value === 'object' && Array.isArray((value as IDataObject).samples),
 		);
 		if (isSampler) {
 			return {

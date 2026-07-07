@@ -80,12 +80,23 @@ describe('handleBackend dispatch', () => {
 		['getStatus', 'status'],
 	])('routes %s to the matching /backends/:name endpoint', async (operation, suffix) => {
 		const { ctx, requests } = makeExecuteContext({
-			params: { backendName: 'ibm_brisbane' },
+			params: { backendName: 'ibm_fez' },
 			http: () => ({}),
 		});
 		await handleBackend.call(ctx, TEST_CTX, operation, 0);
 		const call = requests[0] as HttpCall;
 		expect(call.method).toBe('GET');
-		expect(call.url).toBe(`${TEST_CTX.baseUrl}/backends/ibm_brisbane/${suffix}`);
+		expect(call.url).toBe(`${TEST_CTX.baseUrl}/backends/ibm_fez/${suffix}`);
+	});
+
+	it('rejects an unknown operation instead of requesting /backends/:name/undefined', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { backendName: 'ibm_fez' },
+			http: () => ({}),
+		});
+		await expect(handleBackend.call(ctx, TEST_CTX, 'defaults', 0)).rejects.toThrow(
+			/Unsupported backend operation: defaults/,
+		);
+		expect(requests).toHaveLength(0);
 	});
 });

@@ -23,6 +23,7 @@ export class IbmQuantumErrorTrigger implements INodeType {
 		documentationUrl: 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme',
 		defaults: { name: 'IBM Quantum Error Trigger' },
 		polling: true,
+		// Required by the n8n verification ruleset (node-usable-as-tool); true is the only valid value.
 		usableAsTool: true,
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
@@ -48,17 +49,27 @@ export class IbmQuantumErrorTrigger implements INodeType {
 				default: 20,
 				description: 'How many recent jobs to read on each poll',
 			},
+			{
+				displayName: 'Tag',
+				name: 'tagFilter',
+				type: 'string',
+				default: '',
+				description:
+					'Only consider jobs carrying this tag (set tags on the Submit operation). Leave empty to consider all jobs.',
+			},
 		],
 	};
 
 	async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
 		const errorFilter = this.getNodeParameter('errorFilter', 'any') as string;
 		const limit = this.getNodeParameter('limit', 20) as number;
+		const tagFilter = String(this.getNodeParameter('tagFilter', '') ?? '').trim();
 		return pollJobs(
 			this,
 			limit,
 			(job: IDataObject) => isErrorStatus(extractJobStatus(job), errorFilter),
 			extractStateError,
+			tagFilter ? { tags: tagFilter } : {},
 		);
 	}
 }

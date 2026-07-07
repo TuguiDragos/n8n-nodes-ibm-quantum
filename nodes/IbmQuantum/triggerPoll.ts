@@ -1,8 +1,4 @@
-import {
-	type IDataObject,
-	type INodeExecutionData,
-	type IPollFunctions,
-} from 'n8n-workflow';
+import { type IDataObject, type INodeExecutionData, type IPollFunctions } from 'n8n-workflow';
 
 import { enrichApiError, getBaseUrl } from './transport';
 
@@ -14,6 +10,7 @@ export async function pollJobs(
 	limit: number,
 	matches: (job: IDataObject) => boolean,
 	mapJob: (job: IDataObject) => IDataObject,
+	extraQs: IDataObject = {},
 ): Promise<INodeExecutionData[][] | null> {
 	const credentials = await poll.getCredentials('ibmQuantumApi');
 	const baseUrl = getBaseUrl(credentials.region as string);
@@ -23,7 +20,10 @@ export async function pollJobs(
 		response = (await poll.helpers.httpRequestWithAuthentication.call(poll, 'ibmQuantumApi', {
 			method: 'GET',
 			url: `${baseUrl}/jobs`,
-			qs: { limit },
+			// pending false narrows the scan window to finished jobs, so a burst of new
+			// submissions cannot push a finished job out of it. exclude_params drops each
+			// job's circuit payload, matching the official client's listing default.
+			qs: { limit, pending: false, exclude_params: true, ...extraQs },
 			json: true,
 			timeout: 30000,
 		})) as IDataObject;

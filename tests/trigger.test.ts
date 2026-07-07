@@ -24,4 +24,10 @@ describe('jobMatchesFilter', () => {
 		expect(jobMatchesFilter('canceled', 'canceled')).toBe(true);
 		expect(jobMatchesFilter('cancelled', 'canceled')).toBe(true);
 	});
+
+	it('treats the error alias as failed, like the error trigger does', () => {
+		expect(jobMatchesFilter('error', 'failed')).toBe(true);
+		expect(jobMatchesFilter('error', 'any')).toBe(true);
+		expect(jobMatchesFilter('error', 'completed')).toBe(false);
+	});
 });
