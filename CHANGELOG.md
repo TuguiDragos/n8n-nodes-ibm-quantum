@@ -2,6 +2,12 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.2.3 (2026-07-09)
+
+### Changed
+
+- Toolchain updates: `n8n-workflow` 2.30.1 and `@types/node` 26.1.1. Dev tooling only, no changes to the published node behavior.
+
 ## 0.2.2 (2026-07-07)
 
 ### Fixed
