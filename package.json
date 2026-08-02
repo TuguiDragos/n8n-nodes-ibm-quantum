@@ -1,14 +1,18 @@
 {
   "name": "n8n-nodes-ibm-quantum",
   "version": "0.2.3",
-  "description": "n8n community node to build, submit and retrieve quantum circuits on the IBM Quantum Platform, with triggers for asynchronous job completion and failure handling",
+  "description": "Verified n8n community node for IBM Quantum. Build OpenQASM 3 circuits, submit to Qiskit Runtime, and trigger on job completion or failure. Usable as an AI Agent tool.",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
     "ibm-quantum",
     "qiskit",
-    "quantum-computing",
+    "qiskit-runtime",
     "openqasm",
+    "quantum-computing",
+    "quantum",
+    "ai-agent",
+    "automation",
     "trigger"
   ],
   "license": "MIT",
