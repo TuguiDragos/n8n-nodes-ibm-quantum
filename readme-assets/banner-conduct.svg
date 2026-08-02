@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="168" viewBox="0 0 1200 168" role="img" aria-labelledby="t-coc d-coc">
+<title id="t-coc">Code of conduct</title>
+<desc id="d-coc">Contributor Covenant 3.0. A conversation drawn back and forth between two people, with the wider group listening.</desc>
+<defs>
+  <linearGradient id="g-coc" x1="0" y1="0" x2="1200" y2="168" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#1a1d2e"/><stop offset="1" stop-color="#121422"/>
+  </linearGradient>
+  <radialGradient id="h-coc" cx="1010" cy="84" r="290" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#9184d9" stop-opacity="0.15"/><stop offset="1" stop-color="#9184d9" stop-opacity="0"/>
+  </radialGradient>
+  <style>
+    .ui { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .arc { fill: none; stroke: #9184d9; stroke-width: 1.7; stroke-linecap: round; stroke-dasharray: 172; stroke-dashoffset: 172; opacity: 0; }
+    .arcT { animation: drawT 6.4s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+    .arcB { animation: drawB 6.4s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+    .nodeA { fill: #4a4d73; animation: litA 6.4s ease-out infinite; }
+    .nodeB { fill: #4a4d73; animation: litB 6.4s ease-out infinite; }
+    .ringA { fill: none; stroke: #9184d9; stroke-width: 1.5; opacity: 0; animation: pingA 6.4s ease-out infinite; }
+    .ringB { fill: none; stroke: #9184d9; stroke-width: 1.5; opacity: 0; animation: pingB 6.4s ease-out infinite; }
+    .sat { fill: #9184d9; animation: rest 6.4s ease-in-out infinite; }
+    .s2 { animation-delay: 1.6s }
+    .s3 { animation-delay: 3.2s }
+    @keyframes drawT {
+      0%, 5%    { stroke-dashoffset: 172; opacity: 0 }
+      9%        { opacity: 1 }
+      40%       { stroke-dashoffset: 0; opacity: 1 }
+      86%       { stroke-dashoffset: 0; opacity: 1 }
+      96%, 100% { stroke-dashoffset: 0; opacity: 0 }
+    }
+    @keyframes drawB {
+      0%, 43%   { stroke-dashoffset: 172; opacity: 0 }
+      47%       { opacity: 1 }
+      76%       { stroke-dashoffset: 0; opacity: 1 }
+      86%       { stroke-dashoffset: 0; opacity: 1 }
+      96%, 100% { stroke-dashoffset: 0; opacity: 0 }
+    }
+    @keyframes litA {
+      0%, 2%    { fill: #4a4d73 }
+      8%        { fill: #cfc8f2 }
+      30%       { fill: #9184d9 }
+      72%       { fill: #9184d9 }
+      80%       { fill: #cfc8f2 }
+      96%, 100% { fill: #4a4d73 }
+    }
+    @keyframes litB {
+      0%, 39%   { fill: #4a4d73 }
+      45%       { fill: #cfc8f2 }
+      66%       { fill: #9184d9 }
+      90%       { fill: #9184d9 }
+      96%, 100% { fill: #4a4d73 }
+    }
+    @keyframes pingA {
+      0%, 2%    { r: 7; opacity: 0.6 }
+      15%       { r: 19; opacity: 0 }
+      74%       { r: 7; opacity: 0.6 }
+      87%       { r: 19; opacity: 0 }
+      100%      { r: 19; opacity: 0 }
+    }
+    @keyframes pingB {
+      0%, 39%   { r: 7; opacity: 0 }
+      41%       { r: 7; opacity: 0.6 }
+      54%       { r: 19; opacity: 0 }
+      100%      { r: 19; opacity: 0 }
+    }
+    @keyframes rest {
+      0%, 100%  { opacity: 0.16 }
+      50%       { opacity: 0.4 }
+    }
+  </style>
+</defs>
+<rect width="1200" height="168" rx="14" fill="url(#g-coc)"/>
+<rect width="1200" height="168" rx="14" fill="url(#h-coc)"/>
+<rect x="0.5" y="0.5" width="1199" height="167" rx="14" fill="none" stroke="#2b2e46"/>
+<rect x="56" y="52" width="3" height="64" rx="1.5" fill="#9184d9"/>
+<text x="80" y="76" class="ui" font-size="23" font-weight="500" fill="#e9e9ed" letter-spacing="-0.3">Code of conduct</text>
+<text x="80" y="104" class="ui" font-size="14" fill="#8e91ad">Contributor Covenant 3.0. Be respectful, be constructive.</text>
+<g transform="translate(1000 84)">
+  <circle cx="-118" cy="-26" r="3" class="sat"/>
+  <circle cx="0" cy="-46" r="2.6" class="sat s2"/>
+  <circle cx="118" cy="26" r="3" class="sat s3"/>
+  <path d="M-72 0Q0 -34 72 0" class="arc arcT"/>
+  <path d="M72 0Q0 34 -72 0" class="arc arcB"/>
+  <circle cx="-72" cy="0" r="7" class="ringA"/>
+  <circle cx="72" cy="0" r="7" class="ringB"/>
+  <circle cx="-72" cy="0" r="7" class="nodeA"/>
+  <circle cx="72" cy="0" r="7" class="nodeB"/>
+</g>
+</svg>

@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="168" viewBox="0 0 1200 168" role="img" aria-labelledby="t-con d-con">
+<title id="t-con">Contributing</title>
+<desc id="d-con">Lint, build, test and scan, each one drawn as it passes.</desc>
+<defs>
+  <linearGradient id="g-con" x1="0" y1="0" x2="1200" y2="168" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#1a1d2e"/><stop offset="1" stop-color="#121422"/>
+  </linearGradient>
+  <radialGradient id="h-con" cx="1010" cy="84" r="290" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#9184d9" stop-opacity="0.15"/><stop offset="1" stop-color="#9184d9" stop-opacity="0"/>
+  </radialGradient>
+  <style>
+    .ui { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace; }
+    .track { stroke: #2b2e46; stroke-width: 1.6; fill: none; }
+    .link { stroke: #9184d9; stroke-width: 1.6; fill: none; stroke-dasharray: 66; stroke-dashoffset: 66; opacity: 0.75; }
+    .ring { fill: none; stroke: #9184d9; stroke-width: 1.8; stroke-dasharray: 57; stroke-dashoffset: 57; }
+    .tick { fill: none; stroke: #9184d9; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 17; stroke-dashoffset: 17; }
+    .lbl { fill: #6e7189; }
+    .ring0 { animation: sweep0 7.2s ease-in-out infinite; }
+    .tick0 { animation: mark0 7.2s ease-out infinite; }
+    .lbl0 { animation: lit0 7.2s ease-out infinite; }
+    @keyframes sweep0 {
+      0%, 0%   { stroke-dashoffset: 57 }
+      9%   { stroke-dashoffset: 0 }
+      88%          { stroke-dashoffset: 0 }
+      97%, 100%    { stroke-dashoffset: 57 }
+    }
+    @keyframes mark0 {
+      0%, 8% { stroke-dashoffset: 17 }
+      14%    { stroke-dashoffset: 0 }
+      88%            { stroke-dashoffset: 0 }
+      95%, 100%      { stroke-dashoffset: 17 }
+    }
+    @keyframes lit0 {
+      0%, 8% { fill: #4a4d73 }
+      15%    { fill: #c8cadb }
+      88%            { fill: #c8cadb }
+      97%, 100%      { fill: #4a4d73 }
+    }
+    .ring1 { animation: sweep1 7.2s ease-in-out infinite; }
+    .tick1 { animation: mark1 7.2s ease-out infinite; }
+    .lbl1 { animation: lit1 7.2s ease-out infinite; }
+    @keyframes sweep1 {
+      0%, 18%   { stroke-dashoffset: 57 }
+      27%   { stroke-dashoffset: 0 }
+      88%          { stroke-dashoffset: 0 }
+      97%, 100%    { stroke-dashoffset: 57 }
+    }
+    @keyframes mark1 {
+      0%, 26% { stroke-dashoffset: 17 }
+      32%    { stroke-dashoffset: 0 }
+      88%            { stroke-dashoffset: 0 }
+      95%, 100%      { stroke-dashoffset: 17 }
+    }
+    @keyframes lit1 {
+      0%, 26% { fill: #4a4d73 }
+      33%    { fill: #c8cadb }
+      88%            { fill: #c8cadb }
+      97%, 100%      { fill: #4a4d73 }
+    }
+    .link1 { animation: join1 7.2s ease-in-out infinite; }
+    @keyframes join1 {
+      0%, 11% { stroke-dashoffset: 66 }
+      19% { stroke-dashoffset: 0 }
+      88%        { stroke-dashoffset: 0 }
+      97%, 100%  { stroke-dashoffset: 66 }
+    }
+    .ring2 { animation: sweep2 7.2s ease-in-out infinite; }
+    .tick2 { animation: mark2 7.2s ease-out infinite; }
+    .lbl2 { animation: lit2 7.2s ease-out infinite; }
+    @keyframes sweep2 {
+      0%, 36%   { stroke-dashoffset: 57 }
+      45%   { stroke-dashoffset: 0 }
+      88%          { stroke-dashoffset: 0 }
+      97%, 100%    { stroke-dashoffset: 57 }
+    }
+    @keyframes mark2 {
+      0%, 44% { stroke-dashoffset: 17 }
+      50%    { stroke-dashoffset: 0 }
+      88%            { stroke-dashoffset: 0 }
+      95%, 100%      { stroke-dashoffset: 17 }
+    }
+    @keyframes lit2 {
+      0%, 44% { fill: #4a4d73 }
+      51%    { fill: #c8cadb }
+      88%            { fill: #c8cadb }
+      97%, 100%      { fill: #4a4d73 }
+    }
+    .link2 { animation: join2 7.2s ease-in-out infinite; }
+    @keyframes join2 {
+      0%, 29% { stroke-dashoffset: 66 }
+      37% { stroke-dashoffset: 0 }
+      88%        { stroke-dashoffset: 0 }
+      97%, 100%  { stroke-dashoffset: 66 }
+    }
+    .ring3 { animation: sweep3 7.2s ease-in-out infinite; }
+    .tick3 { animation: mark3 7.2s ease-out infinite; }
+    .lbl3 { animation: lit3 7.2s ease-out infinite; }
+    @keyframes sweep3 {
+      0%, 54%   { stroke-dashoffset: 57 }
+      63%   { stroke-dashoffset: 0 }
+      88%          { stroke-dashoffset: 0 }
+      97%, 100%    { stroke-dashoffset: 57 }
+    }
+    @keyframes mark3 {
+      0%, 62% { stroke-dashoffset: 17 }
+      68%    { stroke-dashoffset: 0 }
+      88%            { stroke-dashoffset: 0 }
+      95%, 100%      { stroke-dashoffset: 17 }
+    }
+    @keyframes lit3 {
+      0%, 62% { fill: #4a4d73 }
+      69%    { fill: #c8cadb }
+      88%            { fill: #c8cadb }
+      97%, 100%      { fill: #4a4d73 }
+    }
+    .link3 { animation: join3 7.2s ease-in-out infinite; }
+    @keyframes join3 {
+      0%, 47% { stroke-dashoffset: 66 }
+      55% { stroke-dashoffset: 0 }
+      88%        { stroke-dashoffset: 0 }
+      97%, 100%  { stroke-dashoffset: 66 }
+    }
+
+  </style>
+</defs>
+<rect width="1200" height="168" rx="14" fill="url(#g-con)"/>
+<rect width="1200" height="168" rx="14" fill="url(#h-con)"/>
+<rect x="0.5" y="0.5" width="1199" height="167" rx="14" fill="none" stroke="#2b2e46"/>
+<rect x="56" y="52" width="3" height="64" rx="1.5" fill="#9184d9"/>
+<text x="80" y="76" class="ui" font-size="23" font-weight="500" fill="#e9e9ed" letter-spacing="-0.3">Contributing</text>
+<text x="80" y="104" class="ui" font-size="14" fill="#8e91ad">Four checks, every one green before a pull request lands.</text>
+
+<g transform="translate(860 74)">
+  <circle cx="0" cy="0" r="9" fill="#171a2a" stroke="#2b2e46" stroke-width="1.6"/>
+  <circle cx="0" cy="0" r="9" class="ring ring0" transform="rotate(-90 0 0)"/>
+  <path d="M-4 0.3 -1.2 3.1 4.2 -2.7" class="tick tick0"/>
+  <text x="0" y="27" text-anchor="middle" class="mono lbl lbl0" font-size="11">lint</text>
+  <path d="M12 0h66" class="track"/>
+  <path d="M12 0h66" class="link link1"/>
+  <circle cx="84" cy="0" r="9" fill="#171a2a" stroke="#2b2e46" stroke-width="1.6"/>
+  <circle cx="84" cy="0" r="9" class="ring ring1" transform="rotate(-90 84 0)"/>
+  <path d="M80 0.3 82.8 3.1 88.2 -2.7" class="tick tick1"/>
+  <text x="84" y="27" text-anchor="middle" class="mono lbl lbl1" font-size="11">build</text>
+  <path d="M96 0h66" class="track"/>
+  <path d="M96 0h66" class="link link2"/>
+  <circle cx="168" cy="0" r="9" fill="#171a2a" stroke="#2b2e46" stroke-width="1.6"/>
+  <circle cx="168" cy="0" r="9" class="ring ring2" transform="rotate(-90 168 0)"/>
+  <path d="M164 0.3 166.8 3.1 172.2 -2.7" class="tick tick2"/>
+  <text x="168" y="27" text-anchor="middle" class="mono lbl lbl2" font-size="11">test</text>
+  <path d="M180 0h66" class="track"/>
+  <path d="M180 0h66" class="link link3"/>
+  <circle cx="252" cy="0" r="9" fill="#171a2a" stroke="#2b2e46" stroke-width="1.6"/>
+  <circle cx="252" cy="0" r="9" class="ring ring3" transform="rotate(-90 252 0)"/>
+  <path d="M248 0.3 250.8 3.1 256.2 -2.7" class="tick tick3"/>
+  <text x="252" y="27" text-anchor="middle" class="mono lbl lbl3" font-size="11">scan</text>
+</g>
+</svg>

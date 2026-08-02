@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="168" viewBox="0 0 1200 168" role="img" aria-labelledby="t-sec d-sec">
+<title id="t-sec">Security policy</title>
+<desc id="d-sec">The API key stays sealed in n8n's encrypted store. Only a short-lived IAM bearer token is issued, filling in as it travels to IBM.</desc>
+<defs>
+  <linearGradient id="g-sec" x1="0" y1="0" x2="1200" y2="168" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#1a1d2e"/><stop offset="1" stop-color="#121422"/>
+  </linearGradient>
+  <radialGradient id="h-sec" cx="1010" cy="84" r="290" gradientUnits="userSpaceOnUse">
+    <stop offset="0" stop-color="#9184d9" stop-opacity="0.15"/><stop offset="1" stop-color="#9184d9" stop-opacity="0"/>
+  </radialGradient>
+  <linearGradient id="vaultfill" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#1c2033"/><stop offset="1" stop-color="#161a29"/>
+  </linearGradient>
+  <style>
+    .ui { font-family: Inter, system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+    .mono { font-family: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo, Consolas, monospace; }
+    .tok   { animation: breathe 8s ease-in-out infinite; }
+    .tokb  { animation: tokb 8s ease-out infinite; }
+    .toktx { animation: toktx 8s ease-out infinite; }
+    .dot   { opacity: 0; }
+    .d0 { animation: pop 8s ease-out infinite 0.24s; }
+    .d1 { animation: pop 8s ease-out infinite 0.58s; }
+    .d2 { animation: pop 8s ease-out infinite 0.92s; }
+    .d3 { animation: pop 8s ease-out infinite 1.26s; }
+    .dock  { animation: dock 8s ease-out infinite; }
+    .dockr { animation: dockr 8s ease-out infinite; }
+    .flow  { stroke-dasharray: 2 6; animation: flow 8s linear infinite; }
+    @keyframes breathe {
+      0%, 100%  { opacity: 0.72 }
+      38%, 80%  { opacity: 1 }
+    }
+    @keyframes pop {
+      0%, 0.9%  { opacity: 0 }
+      1%, 74%   { opacity: 1 }
+      82%, 100% { opacity: 0 }
+    }
+    @keyframes tokb {
+      0%, 33%   { stroke: #3d3f60; fill: #1a1e30 }
+      38%       { stroke: #9184d9; fill: #232744 }
+      80%       { stroke: #3d3f60; fill: #1d2135 }
+      100%      { stroke: #3d3f60; fill: #1a1e30 }
+    }
+    @keyframes toktx {
+      0%, 33%   { fill: #7d80a0 }
+      38%       { fill: #e9e9ed }
+      80%       { fill: #8e91ad }
+      100%      { fill: #7d80a0 }
+    }
+    @keyframes dock {
+      0%, 34%   { fill: #343856 }
+      39%       { fill: #cfc8f2 }
+      82%       { fill: #9184d9 }
+      91%, 100% { fill: #343856 }
+    }
+    @keyframes dockr {
+      0%, 35%   { r: 5; opacity: 0 }
+      38%       { r: 5; opacity: 0.65 }
+      52%       { r: 15; opacity: 0 }
+      100%      { r: 15; opacity: 0 }
+    }
+    @keyframes flow {
+      0%   { stroke-dashoffset: 0 }
+      100% { stroke-dashoffset: -64 }
+    }
+  </style>
+</defs>
+<rect width="1200" height="168" rx="14" fill="url(#g-sec)"/>
+<rect width="1200" height="168" rx="14" fill="url(#h-sec)"/>
+<rect x="0.5" y="0.5" width="1199" height="167" rx="14" fill="none" stroke="#2b2e46"/>
+<rect x="56" y="52" width="3" height="64" rx="1.5" fill="#9184d9"/>
+<text x="80" y="76" class="ui" font-size="23" font-weight="500" fill="#e9e9ed" letter-spacing="-0.3">Security policy</text>
+<text x="80" y="104" class="ui" font-size="14" fill="#8e91ad">Report privately. The API key never leaves n8n's encrypted store.</text>
+<g transform="translate(846 84)">
+  <text x="-12" y="-30" class="mono" font-size="10" fill="#5f6280" letter-spacing="0.4">n8n vault</text>
+  <rect x="-12" y="-21" width="92" height="42" rx="11" fill="url(#vaultfill)" stroke="#343856" stroke-width="1.4"/>
+  <rect x="-8.5" y="-17.5" width="85" height="35" rx="8" fill="none" stroke="#9184d9" stroke-opacity="0.14"/>
+  <g stroke="#9184d9" stroke-opacity="0.1" stroke-width="1">
+    <path d="M40 -14 30 16M50 -14 40 16M60 -14 50 16M70 -14 60 16"/>
+  </g>
+  <g transform="translate(10 1)">
+    <path d="M-5.4 -2.6v-3.6a5.4 5.4 0 0 1 10.8 0v3.6" fill="none" stroke="#9184d9" stroke-width="1.7" stroke-linecap="round"/>
+    <rect x="-7.6" y="-2.6" width="15.2" height="11.6" rx="2.6" fill="#1d2036" stroke="#9184d9" stroke-width="1.7"/>
+    <circle cx="0" cy="3.2" r="1.5" fill="#9184d9"/>
+  </g>
+  <text x="46" y="4" text-anchor="middle" class="mono" font-size="10" fill="#4a4d73">key</text>
+  <path d="M88 0h100" stroke="#2b2e46" stroke-width="1.4"/>
+  <path d="M88 0h100" stroke="#9184d9" stroke-width="1.4" stroke-opacity="0.5" class="flow"/>
+  <g class="tok">
+    <rect x="196" y="-12" width="86" height="24" rx="8" fill="#1a1e30" stroke="#3d3f60" stroke-width="1.4" class="tokb"/>
+    <text x="205" y="3.5" class="mono toktx" font-size="9.5" fill="#7d80a0" letter-spacing="0.3">Bearer</text>
+    <circle cx="250" cy="-0.5" r="1.9" fill="#cfc8f2" class="dot d0"/>
+    <circle cx="257.5" cy="-0.5" r="1.9" fill="#cfc8f2" class="dot d1"/>
+    <circle cx="265" cy="-0.5" r="1.9" fill="#cfc8f2" class="dot d2"/>
+    <circle cx="272.5" cy="-0.5" r="1.9" fill="#cfc8f2" class="dot d3"/>
+  </g>
+  <path d="M290 0h14" stroke="#2b2e46" stroke-width="1.4"/>
+  <circle cx="314" cy="0" r="5" fill="#343856" class="dockr"/>
+  <circle cx="314" cy="0" r="5" fill="#343856" class="dock"/>
+  <text x="314" y="-16" text-anchor="middle" class="mono" font-size="9.5" fill="#5f6280">IBM</text>
+</g>
+</svg>
