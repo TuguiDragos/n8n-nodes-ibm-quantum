@@ -1,179 +1,265 @@
-<h1 align="center">n8n-nodes-ibm-quantum</h1>
+<!--
+  README for n8n-nodes-ibm-quantum
+  Banners and screenshots live in readme-assets/ so they never collide with dist/ or the node sources.
+  Every banner is a plain SVG with CSS keyframes: no build step, no dependencies.
+-->
 
-<p align="center">Build, run and retrieve quantum circuits on the IBM Quantum Platform, straight from n8n.</p>
+<img src="./readme-assets/hero.svg" alt="n8n-nodes-ibm-quantum, a Bell state measured on ibm_kingston" width="100%" />
 
 <p align="center">
-  <a href="https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/actions/workflows/ci.yml"><img src="https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://www.npmjs.com/package/n8n-nodes-ibm-quantum"><img src="https://img.shields.io/npm/v/n8n-nodes-ibm-quantum?style=flat&logo=npm&logoColor=white&color=CB3837" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/n8n-nodes-ibm-quantum"><img src="https://img.shields.io/badge/n8n-verified%20community%20node-EA4B71?style=flat&logo=n8n&logoColor=white" alt="Verified n8n community node"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-2E7D32?style=flat" alt="License: MIT"></a>
+  <a href="https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/actions/workflows/ci.yml"><img alt="CI" height="25" src="https://img.shields.io/github/actions/workflow/status/TuguiDragos/n8n-nodes-ibm-quantum/ci.yml?branch=main&style=flat&label=CI&logo=githubactions&logoColor=9184D9&color=161826&labelColor=161826" /></a>
+  <a href="https://www.npmjs.com/package/n8n-nodes-ibm-quantum"><img alt="npm" height="25" src="https://img.shields.io/npm/v/n8n-nodes-ibm-quantum?style=flat&logo=npm&logoColor=9184D9&label=npm&color=161826&labelColor=161826" /></a>
+  <a href="https://www.npmjs.com/package/n8n-nodes-ibm-quantum"><img alt="Downloads" height="25" src="https://img.shields.io/npm/dm/n8n-nodes-ibm-quantum?style=flat&label=downloads&color=161826&labelColor=161826&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTE4NEQ5IiBzdHJva2Utd2lkdGg9IjIiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCI%2BPHBhdGggZD0iTTEyIDMuMnYxMi40TTYuNiAxMC40IDEyIDE1LjhsNS40LTUuNCIvPjxwYXRoIGQ9Ik0zLjggMTkuNGgxNi40Ii8%2BPC9nPjwvc3ZnPg%3D%3D" /></a>
+  <a href="https://docs.n8n.io/integrations/community-nodes/installation/"><img alt="Verified n8n community node" height="25" src="https://img.shields.io/badge/n8n-verified%20community%20node-161826?style=flat&logo=n8n&logoColor=9184D9&labelColor=161826" /></a>
+  <a href="https://nodejs.org/en/about/previous-releases"><img alt="Node" height="25" src="https://img.shields.io/badge/node-22%20%7C%2024-161826?style=flat&logo=nodedotjs&logoColor=9184D9&labelColor=161826" /></a>
+  <a href="https://youtu.be/6ppR6uCt1_o"><img alt="Setup walkthrough" height="25" src="https://img.shields.io/badge/watch-setup%20%26%20first%20run-161826?style=flat&logo=youtube&logoColor=9184D9&labelColor=161826" /></a>
+  <a href="https://github.com/TuguiDragos/n8n-nodes-ibm-quantum?tab=MIT-1-ov-file"><img alt="MIT" height="25" src="https://img.shields.io/badge/license-MIT-161826?style=flat&labelColor=161826&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjOTE4NEQ5IiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMTIgMy40djE3LjJNNy40IDIwLjZoOS4yTTMuOCA3LjJoMTYuNE0xMiAzLjkgMy44IDcuMk0xMiAzLjlsOC4yIDMuMyIvPjxwYXRoIGQ9Ik0zLjggNy42IDEuNSAxMy4yYTIuNyAyLjcgMCAwIDAgNC42IDB6TTIwLjIgNy42bC0yLjMgNS42YTIuNyAyLjcgMCAwIDAgNC42IDB6Ii8%2BPC9nPjwvc3ZnPg%3D%3D" /></a>
 </p>
 
 <p align="center"><sub>Unofficial, community-maintained node. Not affiliated with, endorsed by, or sponsored by IBM. IBM Quantum and Qiskit are trademarks of International Business Machines Corporation.</sub></p>
 
-<p align="center"><sub>Verified by n8n, so it installs on n8n Cloud as well as self-hosted.</sub></p>
+---
 
-## What it does
+Build, run and retrieve quantum circuits on the IBM Quantum Platform, straight from n8n.
 
-The node groups its work into five resources.
+Verified by n8n, so it installs on n8n Cloud as well as self-hosted. Zero runtime dependencies: no Qiskit, no quantum library, nothing to compile. Circuits travel as OpenQASM 3 strings and the IBM Cloud API key is exchanged for a short-lived IAM bearer token that n8n caches and refreshes on its own.
 
-| Resource | Operations |
-| --- | --- |
-| Backend | List, Get Configuration, Get Properties, Get Status, Get Least Busy |
-| Circuit | Build (from a gate list), Import OpenQASM 3 |
-| Job | Submit to Sampler, Submit to Estimator, Get Status, Get Results, Get Logs, Get Metrics, List (with filters), Update Tags, Cancel, Delete |
-| Session | Create (batch or dedicated), Get, Set Accepting Jobs, Close |
-| Account | Get Usage, Get Instance, Get Configuration |
+<br>
 
-It ships three nodes: the main **IBM Quantum** action node and two polling triggers (**IBM Quantum Trigger** and **IBM Quantum Error Trigger**).
+### What it does
+
+Three nodes ship in the package. In the n8n picker they carry an **(Unofficial)** suffix, as the verification ruleset requires.
+
+| node | type | what it is for |
+| :-- | :-- | :-- |
+| **IBM Quantum (Unofficial)** | action | Every operation below |
+| **IBM Quantum Trigger (Unofficial)** | polling trigger | Fires when a job reaches a terminal state |
+| **IBM Quantum Error Trigger (Unofficial)** | polling trigger | Fires only on failure or cancellation, with the reason |
+
+Twenty four operations across five resources.
+
+| resource | operations |
+| :-- | :-- |
+| **Backend** | List, Get Configuration, Get Properties, Get Status, Get Least Busy |
+| **Circuit** | Build (from a gate list), Import OpenQASM 3 |
+| **Job** | Submit to Sampler, Submit to Estimator, Get Status, Get Results, Get Logs, Get Metrics, List (with filters), Update Tags, Cancel, Delete |
+| **Session** | Create (batch or dedicated), Get, Set Accepting Jobs, Close |
+| **Account** | Get Usage, Get Instance, Get Configuration |
 
 <p align="center">
-  <img src=".github/images/IBM%20Quantum%20-%20Trigger%20Picker.png" alt="IBM Quantum trigger and error-trigger nodes shown in the n8n trigger picker" width="460">
+  <img src="./readme-assets/01-trigger-picker.png" alt="Both trigger nodes in the n8n trigger picker" width="460">
 </p>
 <p align="center"><sub>Both trigger nodes appear in the n8n trigger picker.</sub></p>
 
 <p align="center">
-  <img src=".github/images/IBM%20Quantum%20-%20Actions%20A.png" alt="IBM Quantum node details listing the trigger and the Account and Backend actions" width="330">
-  <img src=".github/images/IBM%20Quantum%20-%20Actions%20B.png" alt="IBM Quantum node details listing the Circuit, Job and Session actions" width="330">
+  <img src="./readme-assets/02-actions-a.png" alt="Trigger, Account and Backend actions" width="330">
+  <img src="./readme-assets/03-actions-b.png" alt="Circuit, Job and Session actions" width="330">
 </p>
 <p align="center"><sub>All five resources and their operations in the node's action list.</sub></p>
 
+<br>
+
+### Use it as an AI Agent tool
+
+All three nodes set `usableAsTool`, so the action node can be attached to an n8n **AI Agent** as a tool and the model calls its operations directly. It is a good fit for the read paths, where the agent asks a question and gets a structured answer:
+
+- *"Which QPU has the shortest queue right now?"* &rarr; Backend, Get Least Busy
+- *"How much runtime is left on my instance?"* &rarr; Account, Get Usage
+- *"Did job d1abc finish?"* &rarr; Job, Get Status
+
+Submission works too, but the agent has to supply a circuit the backend accepts. On real hardware that means a transpiled ISA circuit, so pair it with a pre-built circuit rather than asking the model to write one. See [Transpilation](#transpilation).
+
+<br>
+
+---
+
+## Watch it run
+
+A full walkthrough: creating the credential, wiring the nodes and running a circuit end to end.
+
+**[Setting up and running the IBM Quantum node](https://youtu.be/6ppR6uCt1_o)**
+
 ## Articles
 
-- [My IBM Quantum node for n8n is now live](https://tuguidragos.com/ibm-quantum-node-for-n8n/) — the launch, the n8n verification, and what the three nodes do.
-- [Running Quantum Circuits on Real IBM Hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/) — an end-to-end Bell state on a real QPU (ibm_kingston), including the transpilation step that trips up most first attempts.
+- [My IBM Quantum node for n8n is now live](https://tuguidragos.com/ibm-quantum-node-for-n8n/). The launch, the n8n verification, and what the three nodes do.
+- [Running Quantum Circuits on Real IBM Hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/). An end-to-end Bell state on a real QPU (ibm_kingston), including the transpilation step that trips up most first attempts.
 
-## Architecture
+<br>
 
-The node is a thin REST wrapper with no runtime dependencies. It does not bundle Qiskit or any quantum library. Circuits are expressed as OpenQASM 3 strings, either built by the node from a gate list or passed in directly. The IBM Cloud API key is exchanged for a short-lived IAM bearer token, which n8n caches and refreshes automatically.
+---
 
-## Installation
+## Install
 
 On self-hosted n8n, open the community nodes screen and enter the package name `n8n-nodes-ibm-quantum`. It is verified by n8n, so it is also installable directly on n8n Cloud.
 
-## Prerequisites
+**You need**
 
 - An IBM Cloud account with access to the IBM Quantum Platform
 - An IBM Cloud API key
 - The Cloud Resource Name (CRN) of your Qiskit Runtime instance
-- n8n on a recent version that supports community nodes
+- n8n on a version that supports community nodes
 
-## Getting your credentials
+<br>
 
-Create an **IBM Quantum API** credential in n8n with these fields.
+### Credentials
 
-1. **API Key**: in the IBM Cloud console open [Manage > Access (IAM) > API keys](https://cloud.ibm.com/iam/apikeys), create a key, and copy it immediately (it is shown only once). The node exchanges it for a short-lived IAM token at request time.
-2. **Instance CRN**: open the [IBM Quantum Platform instances page](https://quantum.cloud.ibm.com/instances) and copy the CRN of your Qiskit Runtime instance. It is sent as the `Service-CRN` header.
-3. **Region**: pick US East or EU (Germany) to match your instance. This selects the API host.
-4. **API Version**: the date sent in the `IBM-API-Version` header. The response schema is versioned by this date. The default is a known good value that you can update as IBM publishes newer versions.
+Create an **IBM Quantum API** credential with four fields.
 
-The credential includes a test that calls the backends endpoint, so you can confirm all four fields at once with the **Test** button.
+| field | where it comes from |
+| :-- | :-- |
+| **API Key** | [IBM Cloud, Manage &rsaquo; Access (IAM) &rsaquo; API keys](https://cloud.ibm.com/iam/apikeys). Copy it immediately, it is shown once. The node exchanges it for a short-lived IAM token at request time. |
+| **Instance CRN** | The [IBM Quantum Platform instances page](https://quantum.cloud.ibm.com/instances). Starts with `crn:v1`, sent as the `Service-CRN` header. |
+| **Region** | US East or EU (Germany), matching your instance. This picks the API host, and the two are separate. |
+| **API Version** | The date in the `IBM-API-Version` header, which selects the response schema. Defaults to `2026-04-15`; change it only when [IBM's REST API reference](https://quantum.cloud.ibm.com/docs/en/api/qiskit-runtime-rest) calls for a newer one. |
+
+The credential ships a test that calls the backends endpoint, so the **Test** button confirms all four fields at once. If you would rather watch it done, the [setup walkthrough](https://youtu.be/6ppR6uCt1_o) covers this screen.
 
 <p align="center">
-  <img src=".github/images/IBM%20Quantum%20account%20-%20Credentials.png" alt="IBM Quantum API credential in n8n showing a successful connection test" width="720">
+  <img src="./readme-assets/04-credentials.png" alt="IBM Quantum API credential in n8n after a successful connection test" width="720">
 </p>
 <p align="center"><sub>The credential form after a successful connection test.</sub></p>
 
-## Example workflow
+<br>
 
-A four-node flow that prepares a Bell state, picks a backend, runs it and reads the counts.
+---
 
-1. **Circuit > Build**: Number of Qubits `2`, Number of Classical Bits `2`. Add gates in order: Hadamard on qubits `0`; CNOT / CX on qubits `0,1`; Measure on qubits `0` with Classical Bit `0`; Measure on qubits `1` with Classical Bit `1`. Outputs `qasm3`, `numQubits`, `numClbits`, `gateCount`.
-2. **Backend > Get Least Busy**: Minimum Qubits `2`, Include Simulators off. Outputs `leastBusy` with the backend name.
-3. **Job > Submit**: Primitive Sampler, Backend `={{ $json.leastBusy }}`, OpenQASM 3 Circuit `={{ $('Build').item.json.qasm3 }}` (use the name of your Circuit node), Shots `1024`. Outputs `jobId`.
-4. **Job > Get Results**: Job ID `={{ $json.jobId }}`, Poll Interval `5`, Max Wait `300`. Outputs the parsed `pubs`, each carrying `counts` for the Sampler.
+## A first workflow
+
+Four nodes that prepare a Bell state, pick a backend, run it and read the counts.
+
+1. **Circuit &rsaquo; Build.** Number of Qubits `2`, Number of Classical Bits `2`. Gates in order: Hadamard on `0`; CNOT/CX on `0,1`; Measure on `0` with Classical Bit `0`; Measure on `1` with Classical Bit `1`. Outputs `qasm3`, `numQubits`, `numClbits`, `gateCount`.
+2. **Backend &rsaquo; Get Least Busy.** Minimum Qubits `2`, Include Simulators off. Outputs `leastBusy`.
+3. **Job &rsaquo; Submit to Sampler.** Backend `={{ $json.leastBusy }}`, OpenQASM 3 Circuit `={{ $('Build').item.json.qasm3 }}`, Shots `1024`. Outputs `jobId`.
+4. **Job &rsaquo; Get Results.** Job ID `={{ $json.jobId }}`, Poll Interval `5`, Max Wait `300`. Outputs the parsed `pubs`, each carrying `counts`.
 
 <p align="center">
-  <img src=".github/images/Get%20Least%20Busy%20QPU.png" alt="Get Least Busy backend node choosing the least busy QPU" width="720">
+  <img src="./readme-assets/05-least-busy.png" alt="Get Least Busy choosing the least busy QPU" width="720">
 </p>
 <p align="center"><sub>Get Least Busy ranks the online devices by queue length and returns the best one.</sub></p>
 
 <p align="center">
-  <img src=".github/images/IBM%20Quantum%20-%20Workflow%20A.png" alt="Submit to Sampler node with an ISA circuit, returning a job ID" width="720">
+  <img src="./readme-assets/06-submit.png" alt="Submit to Sampler with an ISA circuit, returning a job ID" width="720">
 </p>
 <p align="center"><sub>Submit to Sampler sends the circuit and returns immediately with a <code>jobId</code>.</sub></p>
 
+<br>
+
+---
+
 ## Long-running jobs
 
-Real hardware jobs can spend a long time in the queue, sometimes minutes to hours. How you wait for the result matters.
+Real hardware jobs can sit in the queue for minutes or hours. How you wait for the result matters.
 
-**Get Results blocks the execution while it polls.** It calls the job endpoint every Poll Interval seconds until the job finishes or Max Wait is reached, holding that one execution open the whole time. That is fine for quick jobs and simulators, but for a long hardware queue it is fragile: if n8n restarts or the run hits a limit, the execution is interrupted and you see "Execution stopped at this node". IBM exposes no push or callback (verified against the API), so something has to poll; the question is whether it blocks a running execution.
+**Get Results blocks the execution while it polls.** It calls the job endpoint every Poll Interval seconds until the job finishes or Max Wait is reached, holding that one execution open the whole time. Fine for simulators and quick jobs; fragile for a long hardware queue, because if n8n restarts or the run hits a limit the execution is interrupted and you see "Execution stopped at this node". IBM exposes no push or callback (verified against the API), so something has to poll. The question is whether it blocks a running execution.
 
-**The healthy pattern is to decouple submission from result handling** with the **IBM Quantum Trigger**:
+**The healthy pattern splits submission from result handling.**
 
-- One workflow submits the job and finishes immediately with the `jobId`. Nothing blocks.
-- A second, **active** workflow starts with the IBM Quantum Trigger. It polls IBM in the background (the n8n scheduler, not a held-open execution) and fires only when a job reaches a terminal state. Its Get Results then returns at once, because the job is already finished.
-
-So polling still happens, but in the background instead of inside a blocking node held open for the whole Max Wait window (300 seconds by default). Use Get Results directly for short jobs and simulators; use Submit plus the trigger for long hardware runs.
+- One workflow submits and finishes immediately with the `jobId`. Nothing blocks.
+- A second, **active** workflow starts with the **IBM Quantum Trigger**. It polls in the background on the n8n scheduler, not inside a held-open execution, and fires only when a job reaches a terminal state. Its Get Results returns at once, because the job is already done.
 
 <p align="center">
-  <img src=".github/images/IBM%20Quantum%20-%20Workflow%20B.png" alt="IBM Quantum Trigger firing on job completion, then Get Results returning measurement counts" width="720">
+  <img src="./readme-assets/07-trigger-results.png" alt="The trigger firing on job completion, then Get Results returning counts" width="720">
 </p>
-<p align="center"><sub>The IBM Quantum Trigger fires when the job finishes, and Get Results returns the measurement counts at once.</sub></p>
+<p align="center"><sub>The trigger fires when the job finishes, and Get Results returns the measurement counts at once.</sub></p>
 
-IBM does not push notifications, so the trigger polls. Set the interval with the built-in Poll Times field, and choose which terminal status should fire it. The trigger only polls while its workflow is **active** (toggle Active); for a one-off test use Fetch Test Event. Each poll scans only finished jobs and skips the circuit payloads, so it stays light. If several workflows share one instance, set **Tags** on the Submit operation and the matching **Tag** filter on the trigger, so each workflow reacts only to its own jobs.
+Set the cadence with the built-in Poll Times field and choose which terminal status fires it. The trigger only runs while its workflow is **active**; for a one-off check use Fetch Test Event. Each poll requests `pending=false` and `exclude_params=true`, so it scans only finished jobs and skips circuit payloads, which keeps it light and stops a burst of new submissions from pushing a finished job out of the scan window. If several workflows share one instance, set **Tags** on Submit and the matching **Tag** filter on the trigger, so each workflow reacts only to its own jobs.
 
-For production, pair it with the **IBM Quantum Error Trigger**, which fires only when a job fails or is canceled (queue timeout, a calibration fault, or a manual cancel from the IBM dashboard). It emits the failure `reason`, `reasonCode` and `reasonSolution` from the job, so a second workflow can alert an engineer or fall back to a simulator instead of stalling.
+For production, pair it with the **IBM Quantum Error Trigger**, which fires only on failure or cancellation: a queue timeout, a calibration fault, a manual cancel from the IBM dashboard. It emits `reason`, `reasonCode` and `reasonSolution` from the job's state, so a second workflow can page an engineer or fall back to a simulator instead of stalling.
+
+<br>
+
+---
 
 ## Sessions and batches
 
-Hybrid quantum-classical loops (VQE, QAOA) submit many circuits in sequence, adjusting parameters between iterations. Submitting each as a standalone job sends every iteration back to the general queue. The **Session** resource avoids that:
+Hybrid loops (VQE, QAOA) submit many circuits in sequence, adjusting parameters between iterations. Submitting each as a standalone job sends every iteration back to the general queue. The **Session** resource avoids that.
 
-- **Create** a session with mode **Batch** (queues jobs to run consecutively; the default and the only mode the Open plan allows) or **Dedicated** (reserves the backend for low-latency back-to-back jobs, paid plans only). It returns a `sessionId`.
+- **Create** a session in mode **Batch** (jobs run consecutively; the default, and the only mode the Open plan allows) or **Dedicated** (reserves the backend for low-latency back-to-back jobs, paid plans only). It returns a `sessionId`.
 - Pass that `sessionId` into the **Session ID** field of each Submit, so the jobs run inside the reservation.
-- **Close** the session at the end of the workflow (or set Accepting Jobs to false), so it does not hold the backend.
+- **Close** the session at the end, or set Accepting Jobs to false, so it stops holding the backend.
 
-Use the **Account** resource (Get Usage) to check `usage_consumed_seconds` against `usage_limit_seconds` before launching a large run.
+Use **Account &rsaquo; Get Usage** to check `usage_consumed_seconds` against `usage_limit_seconds` before launching a large run.
 
-## Gate syntax
+<br>
 
-In the Circuit Build operation each gate has a Qubits field and, for parametric gates, a Parameters field. Both are comma separated.
+---
 
-- Single qubit gates take one qubit index, for example `0`.
-- Two qubit controlled gates take the control first and the target last, for example `0,1` for control 0 and target 1.
-- The Toffoli (CCX) gate takes two controls and a target, for example `0,1,2`.
-- Parametric gates read their angles in radians from the Parameters field. RX, RY, RZ, Phase and the Controlled-R gates take one value; the U gate takes exactly three (theta, phi, lambda).
-- The Measure instruction writes to the classical bit given in the Classical Bit field.
+## Building circuits
 
-Invalid input (wrong number of qubits or parameters, an out-of-range index, or a non-numeric value) is rejected at build time with a clear error, so a malformed program never reaches IBM.
+The Circuit Build operation takes a gate list and emits an OpenQASM 3 string. Each gate has a **Qubits** field and, for parametric gates, a **Parameters** field; both are comma separated.
 
-The Build operation outputs a `qasm3` string that you pass into a Job Submit node using an expression.
+- Single-qubit gates take one index, for example `0`.
+- Controlled gates take the control first and the target last, so `0,1` is control 0 and target 1.
+- Toffoli takes two controls and a target, `0,1,2`.
+- Angles are radians. The U gate takes exactly three (theta, phi, lambda).
+- Measure writes to the classical bit given in the **Classical Bit** field.
+
+### Supported gates
+
+| gate | qubits | params | what it is |
+| :-- | :-- | :-- | :-- |
+| `id` | 1 | 0 | Identity |
+| `x` `y` `z` | 1 | 0 | Pauli gates |
+| `h` | 1 | 0 | Hadamard |
+| `s` `sdg` | 1 | 0 | Phase &pi;/2 and its inverse |
+| `t` `tdg` | 1 | 0 | Phase &pi;/4 and its inverse |
+| `rx` `ry` `rz` | 1 | 1 | Rotation about X, Y, Z |
+| `p` | 1 | 1 | Phase |
+| `U` | 1 | 3 | Generic single-qubit unitary (theta, phi, lambda) |
+| `cx` | 2 | 0 | CNOT, control first |
+| `cz` | 2 | 0 | Controlled-Z |
+| `swap` | 2 | 0 | Swap |
+| `crx` `cry` `crz` | 2 | 1 | Controlled rotation, control first |
+| `ccx` | 3 | 0 | Toffoli, two controls then the target |
+| `measure` | 1 | 0 | Writes to the classical bit you name |
+| `reset` | 1 | 0 | Reset to \|0&rang; |
+| `barrier` | any | 0 | Optimization barrier; omit qubits for the whole register |
+
+The U gate is emitted as the OpenQASM 3 builtin `U`, uppercase. A lowercase `u` is not defined in `stdgates.inc` and IBM's parser rejects it.
+
+Bad input is caught at build time, not at IBM: the wrong number of qubits or parameters, an index outside the register, a non-numeric value, a measure aimed past the classical register, or a zero, negative or non-integer register size. The error names the gate and what it expected.
+
+<br>
+
+---
 
 ## Primitives and options
 
-The Submit operation is split per primitive, since their inputs differ:
+Submit is split per primitive, because their inputs differ.
 
-- **Submit to Sampler** returns measurement counts. Set Shots to the number of repetitions.
-- **Submit to Estimator** returns expectation values. Set Observables to a Pauli string whose length matches the qubit count (for example `ZZ` for two qubits) or an array of such strings, pick a Resilience Level, and optionally a Precision.
+- **Submit to Sampler** returns measurement counts. Set **Shots**.
+- **Submit to Estimator** returns expectation values. Set **Observables** to a Pauli string whose length matches the qubit count (`ZZ` for two qubits) or an array of them, pick a **Resilience Level**, and optionally a **Precision**.
 
-Both share error-suppression toggles that matter on real hardware: **Dynamical Decoupling**, **Gate Twirling** and **Measurement Twirling**. For parametrized circuits, set **Parameters** to a JSON object binding parameter names to values, e.g. `{"theta": 1.5708}`. **Additional Options** is a JSON escape hatch merged into the primitive `options`, for example `{"default_shots": 4096}`.
+Both share the error-suppression toggles that matter on hardware: **Dynamical Decoupling**, **Gate Twirling**, **Measurement Twirling**. For parametrized circuits, **Parameters** takes a JSON object binding names to values, e.g. `{"theta": 1.5708}`. **Additional Options** is a JSON escape hatch merged into the primitive `options`, e.g. `{"default_shots": 4096}`.
 
-Both Submit operations also accept **Tags** (comma separated, stored on the job and usable as a filter in Job List and in the triggers) and a **Private** toggle that hides the job's inputs and results from other collaborators on plans that support private jobs.
+Both also accept **Tags** (comma separated, stored on the job and usable as a filter in Job List and in both triggers) and a **Private** toggle that hides the job's inputs and results from collaborators, on plans that support private jobs.
 
-## Bit order
+**Bit order.** Sampler counts follow the classical register: `c[0]` is the rightmost bit of each bitstring, the standard Qiskit convention. Samples arrive as hex and are decoded with BigInt, so registers wider than 53 bits keep every bit instead of silently collapsing distinct outcomes.
 
-Sampler counts follow the classical register order. The bit `c[0]` is the rightmost bit in each output bitstring, which matches the standard Qiskit convention.
+<br>
+
+---
 
 ## Transpilation
 
-This is the single most common reason a real-hardware job fails, so it is worth understanding.
+The single most common reason a real-hardware job fails, so it is worth understanding.
 
 ### Why it is needed
 
-A textbook circuit uses high-level gates such as `h` (Hadamard) and `cx` (CNOT). A real quantum chip does not run those directly. Each backend executes only a small set of **native gates** (for example a Heron processor like `ibm_fez` runs `rz`, `sx`, `x`, `cz`, plus measure and reset), and its qubits are wired in a fixed topology. Translating a circuit into a backend's native gates and connectivity is called **transpilation**, and the result is an **ISA** (Instruction Set Architecture) circuit.
+A textbook circuit uses high-level gates like `h` and `cx`. A real chip does not run those. Each backend executes a small set of **native gates** (a Heron processor such as `ibm_fez` runs `rz`, `sx`, `x`, `cz`, plus measure and reset) over a fixed qubit topology. Translating a circuit into that gate set and connectivity is **transpilation**, and the result is an **ISA** (Instruction Set Architecture) circuit.
 
-The Qiskit Runtime REST API **does not transpile**. It expects an ISA circuit and rejects anything else. If you submit a raw circuit to a real backend you get a failed job with `reason_code: 1517`:
+The Qiskit Runtime REST API **does not transpile**. It expects an ISA circuit and rejects anything else. Submit a raw circuit to real hardware and the job fails with `reason_code: 1517`:
 
 ```
 The instruction h on qubits (0,) is not supported by the target system.
 Transpile your circuits for the target before submitting a primitive query.
 ```
 
-This is not a node bug. The node builds, submits and reads the job correctly; the hardware refuses a non-ISA circuit.
+That is not a node bug. The node builds, submits and reads the job correctly; the hardware refuses a non-ISA circuit.
 
-### How to transpile (free, any plan)
+### How to transpile, free, on any plan
 
-Transpile locally with Qiskit, then feed the ISA string into the node. You do not need live credentials: a fake backend carries the real topology and native gate set. Current Qiskit (2.5+) requires Python with NumPy 2.0 or newer.
+Transpile locally with Qiskit, then feed the ISA string into the node. You do not need live credentials: a fake backend carries the real topology and native gate set. Current Qiskit (2.5+) needs Python with NumPy 2.0 or newer.
 
 ```python
 from qiskit import QuantumCircuit, qasm3
@@ -189,7 +275,7 @@ qc.measure(0, 0)
 qc.measure(1, 1)
 
 isa = generate_preset_pass_manager(optimization_level=1, backend=backend).run(qc)
-print(qasm3.dumps(isa))  # paste this ISA string into the node
+print(qasm3.dumps(isa))  # paste this into the node
 ```
 
 For a real run, swap the fake backend for the live one (`QiskitRuntimeService(channel="ibm_cloud", token=..., instance=...).backend("ibm_fez")`) so the layout matches the exact device.
@@ -214,47 +300,74 @@ c[0] = measure $0;
 c[1] = measure $1;
 ```
 
-### How to run it in the node
+### Running it in the node
 
-1. Put the ISA string into **Circuit, Import OpenQASM 3**, or paste it straight into the **OpenQASM 3 Circuit** field of a Submit operation.
-2. Pin **Backend** to the exact device you transpiled for (for example `ibm_fez`), not Get Least Busy. An ISA circuit is specific to one topology; another device may reject it.
+1. Put the ISA string into **Circuit &rsaquo; Import OpenQASM 3**, or paste it into the **OpenQASM 3 Circuit** field of a Submit operation.
+2. Pin **Backend** to the exact device you transpiled for, not Get Least Busy. An ISA circuit is specific to one topology and another device may reject it.
 3. Submit to Sampler or Estimator as usual.
 
-### The cloud Transpiler Service (paid plans only)
+### The cloud Transpiler Service
 
-IBM also offers the [Qiskit Transpiler Service](https://quantum.cloud.ibm.com/docs/en/api/qiskit-transpiler-service-rest/tags/transpiler-methods), a separate cloud API (`https://cloud-transpiler.quantum.ibm.com/transpile`) that transpiles remotely, optionally with AI-powered passes. It is **only available on the Premium, Flex and On-Prem plans**, not the free Open plan, and it lives at a different host from the Qiskit Runtime API, so it is not wired into this node. On the Open plan, transpile locally as shown above.
+IBM also runs the [Qiskit Transpiler Service](https://quantum.cloud.ibm.com/docs/en/api/qiskit-transpiler-service-rest/tags/transpiler-methods), a separate cloud API (`https://cloud-transpiler.quantum.ibm.com/transpile`) that transpiles remotely, optionally with AI passes. It is available **only on the Premium, Flex and On-Prem plans**, and it lives at a different host from the Qiskit Runtime API, so it is not wired into this node. On the Open plan, transpile locally.
 
 ### Simulators
 
-Simulators accept any gate and need no transpilation, so setting **Include Simulators** on Get Least Busy lets a circuit run as written. Note that the current IBM Quantum Platform has largely retired cloud simulators, so an instance may have none available and fall back to hardware.
+Simulators accept any gate and need no transpilation, so **Include Simulators** on Get Least Busy lets a circuit run as written. Note that the current IBM Quantum Platform has largely retired cloud simulators, so an instance may have none and fall back to hardware.
+
+<br>
+
+---
 
 ## Troubleshooting
 
-- **401 or IAM token errors on every call**: the API key is wrong, revoked or expired. Regenerate it in IBM Cloud and update the credential.
-- **404 or an empty backends list**: the Region does not match the region of your instance CRN. US East and EU (Germany) are separate hosts.
-- **Job never completes in Get Results**: large hardware queues can exceed the Max Wait. Raise Max Wait, or poll separately with Get Status and call Get Results once the job is done.
-- **Job fails with `reason_code: 1517` (instruction not supported)**: the circuit was not transpiled to the backend's native gates. See the Transpilation section above.
-- **Submit rejected by IBM**: the Observables length does not match the qubit count, or the circuit is not valid ISA for the chosen backend.
+| symptom | cause and fix |
+| :-- | :-- |
+| **401 or IAM token errors on every call** | The API key is wrong, revoked or expired. Regenerate it in IBM Cloud and update the credential. |
+| **404 or an empty backends list** | The Region does not match the region of your instance CRN. US East and EU (Germany) are separate hosts. |
+| **Get Results never completes** | A large hardware queue exceeded Max Wait. Raise it, or submit and use the trigger instead of blocking. |
+| **Job fails with `reason_code: 1517`** | The circuit was not transpiled to the backend's native gates. See [Transpilation](#transpilation). |
+| **Submit rejected by IBM** | Observables length does not match the qubit count, or the circuit is not valid ISA for the chosen backend. |
+
+Errors coming back from IBM are unwrapped before they reach you. IBM returns `{ errors: [{ code, message, solution }] }`, which n8n's default error handling never reads, so it would show a generic "Bad request". The node pulls the real message out, and IBM's suggested solution becomes the error description.
+
+<br>
+
+---
 
 ## Development
 
 ```bash
-npm install   # on Node 24+, use: npm install --ignore-scripts
-npm run lint
-npm run build
-npm test
+npm install      # on Node 24+: npm install --ignore-scripts
+npm run lint     # ESLint with the n8n community node ruleset
+npm run build    # compile TypeScript and copy icons into dist
+npm test         # Vitest, the full unit suite
+npm run scan     # the official n8n community package scanner
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. Release history lives in [CHANGELOG.md](CHANGELOG.md) and the GitHub Releases page.
+All four run in CI on Node 22 and 24. `isolated-vm`, a native transitive dev dependency pulled in by `n8n-workflow`, is not needed to lint, build or test, which is why install scripts are skipped.
 
-## Releasing
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) for the full workflow, [SECURITY.md](SECURITY.md) for reporting a vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
-Releases publish to npm with provenance through the `publish.yml` GitHub Actions workflow when a GitHub release is created. Authentication uses an npm automation token stored as the `NPM_TOKEN` repository secret; provenance still works because the repo is public and the job has `id-token: write`. The package version must match the release tag.
+**Releasing.** `publish.yml` publishes to npm with provenance when a GitHub release is created. It verifies the `package.json` version matches the release tag before publishing, authenticates with an npm automation token stored as the `NPM_TOKEN` secret, and gets provenance because the repo is public and the job holds `id-token: write`.
+
+<br>
+
+---
 
 ## Notes on the live API
 
-The request and response shapes follow the published Qiskit Runtime REST API reference. The job body sends the primitive as `program_id`, the circuit inside a PUB, and `version` 2 in `params`, with `resilience_level` at the params level for the Estimator. Sampler results are read from `results[i].data[register].samples` as hex strings, and the least busy backend is chosen from the backends list, which already carries the status, qubit count and queue length for each device.
+Request and response shapes follow the published Qiskit Runtime REST API reference. The job body sends the primitive as `program_id`, the circuit inside a PUB, and `version` 2 in `params`, with `resilience_level` at the params level for the Estimator. Sampler results are read from `results[i].data[register].samples` as hex strings. The least busy backend is chosen from the backends list, which already carries status, qubit count and queue length per device. Every request carries a 30 second timeout so a hung connection cannot stall an execution.
+
+<br>
+
+---
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) &nbsp;&#183;&nbsp; [contact@tuguidragos.com](mailto:contact@tuguidragos.com)
+
+<br>
+
+---
+
+<p align="center">Built with 🖤 by <a href="https://tuguidragos.com">Țugui Dragoș</a></p>
