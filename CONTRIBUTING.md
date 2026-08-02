@@ -22,12 +22,13 @@ npm install --ignore-scripts
 
 | command | what it does |
 | :-- | :-- |
-| `npm run lint` | ESLint with the n8n community node ruleset |
+| `npm run lint` | ESLint over `package.json`, `nodes` and `credentials`, with both the n8n community-nodes ruleset and `eslint-plugin-n8n-nodes-base`. This mirrors what the official verification scanner runs, so a clean local lint means a clean scan. |
 | `npm run build` | Compile TypeScript and copy icons into `dist` |
 | `npm test` | Vitest, the full unit suite |
+| `npm run test:coverage` | The same suite with coverage, checked against the thresholds in `vitest.config.mts` |
 | `npm run scan` | The official n8n community package scanner, run before submitting for verification |
 
-All four run in CI on Node 22 and 24. Please make sure `lint`, `build` and `test` pass before opening a pull request.
+CI runs `lint`, `build` and `test:coverage` on Node 22 and 24. `scan` is not part of CI because it inspects the published package on npm, so it only makes sense once a version is out. Please make sure the first three pass before opening a pull request.
 
 ## Style
 
@@ -37,4 +38,6 @@ All four run in CI on Node 22 and 24. Please make sure `lint`, `build` and `test
 
 ## Releasing
 
-`publish.yml` publishes to npm with provenance when a GitHub release is created. The `package.json` version must match the release tag; the workflow checks this and fails the publish if they diverge.
+`publish.yml` publishes to npm when a GitHub release is created. The `package.json` version must match the release tag; the workflow checks this and fails the publish if they diverge.
+
+Authentication is npm trusted publishing over OpenID Connect, so there is no token in the repository and nothing to rotate. The job holds `id-token: write` and exchanges a short-lived, workflow-scoped credential for publish rights, and provenance attestations are generated automatically on that path. It runs on Node 24 rather than 22 because trusted publishing needs npm 11.5.1 or newer, and Node 22 still ships npm 10.9.x.

@@ -30,4 +30,6 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run build
-      - run: npm test
+      # Coverage rather than a plain test run, so the thresholds in vitest.config.mts are an
+      # actual gate. Without this they only apply when someone remembers to run them locally.
+      - run: npm run test:coverage
