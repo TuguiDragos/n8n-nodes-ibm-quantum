@@ -33,6 +33,18 @@ describe('handleCircuitBuild gate mapping and ordering (TEST-06)', () => {
 		expect(lines).toContain('c[0] = measure q[0];');
 		expect(result.gateCount).toBe(6);
 	});
+
+	// A gate object built outside the UI (an AI Agent tool call, an imported workflow, the public
+	// API) can omit clbit entirely. That has to land on c[0], the bit validation range-checked,
+	// rather than on the qubit index, which produced a write past the classical register.
+	it('measures into c[0] when the gate carries no classical bit', () => {
+		const result = build({
+			numQubits: 3,
+			numClbits: 1,
+			gates: { gate: [{ gate: 'measure', qubits: '2', params: '' }] },
+		});
+		expect((result.qasm3 as string).split('\n')).toContain('c[0] = measure q[2];');
+	});
 });
 
 describe('handleCircuitBuild register size validation', () => {

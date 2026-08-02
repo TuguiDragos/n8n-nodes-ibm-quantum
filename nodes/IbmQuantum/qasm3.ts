@@ -12,7 +12,8 @@ export interface CircuitDefinition {
 	gates: GateOperation[];
 }
 
-const SINGLE_QUBIT = new Set(['id', 'x', 'y', 'z', 'h', 's', 'sdg', 't', 'tdg']);
+// 'id' is deliberately absent: it is handled separately, see the 'id' case in renderGate.
+const SINGLE_QUBIT = new Set(['x', 'y', 'z', 'h', 's', 'sdg', 't', 'tdg']);
 const SINGLE_QUBIT_PARAM = new Set(['rx', 'ry', 'rz', 'p']);
 const CONTROLLED_PARAM = new Set(['crx', 'cry', 'crz']);
 
@@ -130,7 +131,16 @@ function renderGate(op: GateOperation): string {
 
 	switch (gate) {
 		case 'measure':
-			return `c[${op.clbit ?? targets[0]}] = measure ${q(targets[0])};`;
+			// Fall back to 0, matching the bound validateGateInput range-checks. Falling back to the
+			// qubit index instead emitted c[i] for a register validation had only proved has a bit 0,
+			// so a 3-qubit / 1-clbit circuit produced an out-of-range c[2] that IBM rejects.
+			return `c[${op.clbit ?? 0}] = measure ${q(targets[0])};`;
+		case 'id':
+			// Emit nothing. stdgates.inc defines id as U(0, 0, 0), and IBM's target rejects the
+			// builtin U, so "id q[n];" fails the job on real hardware with "the instruction u is
+			// not supported" even though the backend lists id among its basis gates. id is the
+			// identity, so dropping it leaves a mathematically equivalent circuit that runs.
+			return '';
 		case 'reset':
 			return `reset ${q(targets[0])};`;
 		case 'barrier':
@@ -159,6 +169,10 @@ function renderGate(op: GateOperation): string {
 export function buildQasm3(circuit: CircuitDefinition): string {
 	const lines = ['OPENQASM 3.0;', 'include "stdgates.inc";', `qubit[${circuit.numQubits}] q;`];
 	if (circuit.numClbits > 0) lines.push(`bit[${circuit.numClbits}] c;`);
-	for (const op of circuit.gates) lines.push(renderGate(op));
+	// renderGate returns an empty string for instructions that must not reach the program (id).
+	for (const op of circuit.gates) {
+		const line = renderGate(op);
+		if (line) lines.push(line);
+	}
 	return lines.join('\n');
 }

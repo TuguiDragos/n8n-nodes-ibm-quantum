@@ -12,9 +12,13 @@ const API = `${BASE}/api/v1`;
 const KEY = process.env.N8N_API_KEY;
 const CRED = { ibmQuantumApi: { id: process.env.QA_CRED_ID, name: process.env.QA_CRED_NAME || 'IBM Quantum account' } };
 const BACKEND = process.env.QA_BACKEND || 'ibm_kingston';
-const IBM = 'CUSTOM.ibmQuantum';
-const TRIGGER = 'CUSTOM.ibmQuantumTrigger';
-const ERROR_TRIGGER = 'CUSTOM.ibmQuantumErrorTrigger';
+// Node type prefix. n8n names a node loaded through N8N_CUSTOM_EXTENSIONS `CUSTOM.<name>`, but a
+// node installed as a community package `<package-name>.<name>`. Default to the community form,
+// since that is how users actually get it; set QA_PREFIX=CUSTOM for a custom-extensions checkout.
+const PREFIX = process.env.QA_PREFIX || 'n8n-nodes-ibm-quantum';
+const IBM = `${PREFIX}.ibmQuantum`;
+const TRIGGER = `${PREFIX}.ibmQuantumTrigger`;
+const ERROR_TRIGGER = `${PREFIX}.ibmQuantumErrorTrigger`;
 const KEEP = process.env.KEEP === '1';
 
 if (!KEY) { console.error('Set N8N_API_KEY'); process.exit(1); }

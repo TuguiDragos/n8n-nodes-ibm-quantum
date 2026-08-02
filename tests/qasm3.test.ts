@@ -120,4 +120,45 @@ describe('buildQasm3', () => {
 		expect(lines).toContain('reset q[0];');
 		expect(lines).toContain('barrier q;');
 	});
+
+	// validateGateInput range-checks `clbit ?? 0`, so the renderer has to agree. It used to fall
+	// back to the qubit index, which passed validation and then wrote past the classical register.
+	it('renders a measure with no classical bit into c[0], matching what validation checked', () => {
+		const gates: GateOperation[] = [
+			{ gate: 'measure', targets: [2], controls: [], params: [] },
+		];
+
+		expect(validateGateInput('measure', [2], [], undefined, 3, 1)).toBeNull();
+		expect(buildQasm3({ numQubits: 3, numClbits: 1, gates })).toContain('c[0] = measure q[2];');
+	});
+});
+
+describe('identity is accepted but never emitted', () => {
+	// stdgates.inc defines id through the builtin U, which IBM's target rejects, so emitting it
+	// fails the job on real hardware. Dropping it leaves a mathematically identical circuit.
+	it('drops id from the program while keeping the surrounding instructions', () => {
+		const gates: GateOperation[] = [
+			{ gate: 'id', targets: [0], controls: [], params: [] },
+			{ gate: 'x', targets: [0], controls: [], params: [] },
+			{ gate: 'id', targets: [1], controls: [], params: [] },
+			{ gate: 'measure', targets: [0], controls: [], params: [], clbit: 0 },
+		];
+		const qasm = buildQasm3({ numQubits: 2, numClbits: 1, gates });
+
+		expect(qasm).not.toMatch(/\bid\b/);
+		expect(qasm).not.toMatch(/\bU\(/);
+		expect(qasm.split('\n')).toEqual([
+			'OPENQASM 3.0;',
+			'include "stdgates.inc";',
+			'qubit[2] q;',
+			'bit[1] c;',
+			'x q[0];',
+			'c[0] = measure q[0];',
+		]);
+	});
+
+	it('still validates the identity operand, so a bad index is caught rather than silently dropped', () => {
+		expect(validateGateInput('id', [5], [], undefined, 2, 0)).toMatch(/qubit index 5/);
+		expect(validateGateInput('id', [], [], undefined, 2, 0)).toMatch(/expects 1 qubit/);
+	});
 });

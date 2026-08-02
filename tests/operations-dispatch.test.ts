@@ -82,7 +82,7 @@ describe('handleJob dispatch (TEST-12)', () => {
 			exclude_params: false,
 			backend: 'ibm_kingston',
 			session_id: 'sess-1',
-			tags: 'vqe',
+			tags: ['vqe'],
 			pending: false,
 			created_after: '2026-07-01T00:00:00.000Z',
 			sort: 'ASC',

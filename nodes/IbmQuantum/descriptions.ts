@@ -90,7 +90,7 @@ export const nodeProperties: INodeProperties[] = [
 			{
 				name: 'Import OpenQASM 3',
 				value: 'import',
-				action: 'Import an existing OpenQASM 3 circuit',
+				action: 'Import an existing OPENQASM 3 circuit',
 			},
 		],
 		default: 'build',
@@ -110,19 +110,19 @@ export const nodeProperties: INodeProperties[] = [
 			{
 				name: 'Get Results',
 				value: 'getResults',
-				action: 'Poll until the job finishes, then retrieve its results',
+				action: 'Poll until the job finishes and retrieve its results',
 			},
 			{ name: 'Get Status', value: 'getStatus', action: 'Get the status of a job' },
 			{ name: 'List', value: 'list', action: 'List recent jobs' },
 			{
 				name: 'Submit to Estimator',
 				value: 'submitEstimator',
-				action: 'Submit a circuit to the Estimator primitive',
+				action: 'Submit a circuit to the estimator primitive',
 			},
 			{
 				name: 'Submit to Sampler',
 				value: 'submitSampler',
-				action: 'Submit a circuit to the Sampler primitive',
+				action: 'Submit a circuit to the sampler primitive',
 			},
 			{ name: 'Update Tags', value: 'updateTags', action: 'Replace the tags of a job' },
 		],
@@ -220,7 +220,8 @@ export const nodeProperties: INodeProperties[] = [
 						type: 'options',
 						default: 'h',
 						options: GATE_OPTIONS,
-						description: 'Gate or instruction to append',
+						description:
+							'Gate or instruction to append. Identity is accepted but emits nothing, because the OpenQASM 3 standard library defines it through the builtin U gate, which IBM hardware rejects.',
 					},
 					{
 						displayName: 'Qubits',
@@ -240,7 +241,9 @@ export const nodeProperties: INodeProperties[] = [
 						placeholder: '1.5708 or 0.1,0.2,0.3',
 						description:
 							'Comma-separated angles in radians. One value for RX/RY/RZ/Phase/Controlled-R gates; exactly three (theta, phi, lambda) for the U gate.',
-						displayOptions: { show: { gate: ['rx', 'ry', 'rz', 'p', 'crx', 'cry', 'crz', 'u'] } },
+						displayOptions: {
+							show: { gate: ['rx', 'ry', 'rz', 'p', 'crx', 'cry', 'crz', 'u'] },
+						},
 					},
 					{
 						displayName: 'Classical Bit',
@@ -353,7 +356,8 @@ export const nodeProperties: INodeProperties[] = [
 		name: 'twirlingGates',
 		type: 'boolean',
 		default: false,
-		description: 'Whether to apply Pauli twirling to gates to suppress coherent errors',
+		description:
+			'Whether to apply Pauli twirling to gates to suppress coherent errors. Leave this off for a circuit containing fractional gates such as a parametrised RX or RZZ, including anything Qiskit transpiles for a Heron processor: IBM rejects that combination with "gate twirling does not support fractional gates". Measurement twirling has no such restriction.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 	{
@@ -457,7 +461,9 @@ export const nodeProperties: INodeProperties[] = [
 		displayName: 'Limit',
 		name: 'limit',
 		type: 'number',
-		typeOptions: { minValue: 1 },
+		// IBM caps GET /jobs at 200 and silently substitutes its own default for anything outside
+		// the range, so the ceiling is worth showing in the UI rather than hiding.
+		typeOptions: { minValue: 1, maxValue: 200 },
 		default: 50,
 		description: 'Max number of results to return',
 		displayOptions: { show: { resource: ['job'], operation: ['list'] } },
@@ -508,6 +514,18 @@ export const nodeProperties: INodeProperties[] = [
 				description: 'Number of jobs to skip, for paging through older jobs',
 			},
 			{
+				displayName: 'Program',
+				name: 'program',
+				type: 'options',
+				options: [
+					{ name: 'Any', value: '' },
+					{ name: 'Estimator', value: 'estimator' },
+					{ name: 'Sampler', value: 'sampler' },
+				],
+				default: '',
+				description: 'Only jobs submitted to this primitive',
+			},
+			{
 				displayName: 'Session ID',
 				name: 'sessionId',
 				type: 'string',
@@ -538,11 +556,13 @@ export const nodeProperties: INodeProperties[] = [
 				description: 'Keep all jobs, only finished ones, or only queued and running ones',
 			},
 			{
-				displayName: 'Tag',
+				displayName: 'Tags',
 				name: 'tag',
 				type: 'string',
 				default: '',
-				description: 'Only jobs carrying this tag',
+				placeholder: 'experiment-7, vqe',
+				description:
+					'Only jobs carrying these tags. Comma-separated for several, up to the eight the API accepts. A job must carry all of them to match.',
 			},
 		],
 	},

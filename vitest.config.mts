@@ -12,7 +12,12 @@ export default defineConfig({
 			include: ['nodes/IbmQuantum/**/*.ts', 'credentials/**/*.ts'],
 			exclude: ['nodes/IbmQuantum/descriptions.ts', 'nodes/IbmQuantum/**/*.node.ts'],
 			reporter: ['text', 'html'],
-			thresholds: { lines: 85, functions: 85, branches: 80 },
+			// Set just under the current actuals, so a regression trips the gate rather than
+			// quietly eroding the suite. Raise them again when coverage climbs.
+			// Just under the current actuals, so a regression trips the gate rather than quietly
+			// eroding the suite. Branches stop short of 100 because a handful of guards are
+			// unreachable by construction (see the note in results.ts and getResults).
+			thresholds: { lines: 100, statements: 99, functions: 100, branches: 97 },
 		},
 	},
 });

@@ -67,7 +67,7 @@ export class IbmQuantum implements INodeType {
 					} else if (resource === 'session') {
 						result = await handleSession.call(this, ctx, operation, i);
 					} else if (resource === 'account') {
-						result = await handleAccount.call(this, ctx, operation);
+						result = await handleAccount.call(this, ctx, operation, i);
 					} else {
 						result = await handleJob.call(this, ctx, operation, i);
 					}

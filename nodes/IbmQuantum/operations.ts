@@ -16,7 +16,11 @@ const CONTROLLED_TWO = new Set(['cx', 'cz', 'crx', 'cry', 'crz']);
 
 // Build a GateOperation from parsed, validated input.
 function mapGate(gate: string, qubits: number[], params: number[], clbit?: number): GateOperation {
-	if (gate === 'measure') return { gate, targets: [qubits[0]], controls: [], params: [], clbit };
+	// Normalize the missing-clbit case to 0 here, because that is the value validateGateInput
+	// range-checked. Leaving it undefined let the renderer fall back to the qubit index instead,
+	// which passed validation and then emitted a write past the end of the classical register.
+	if (gate === 'measure')
+		return { gate, targets: [qubits[0]], controls: [], params: [], clbit: clbit ?? 0 };
 	if (gate === 'swap') return { gate, targets: [qubits[0], qubits[1]], controls: [], params: [] };
 	if (gate === 'ccx') {
 		return {
@@ -76,6 +80,8 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 			qubits = parseNumberListStrict((raw.qubits as string) ?? '', 'Qubits');
 			params = parseNumberListStrict((raw.params as string) ?? '', 'Parameters');
 		} catch (error) {
+			// parseNumberListStrict only ever throws an Error, so the String() arm is unreachable.
+			// It stays because narrowing an unknown catch binding without it is not type-safe.
 			const message = error instanceof Error ? error.message : String(error);
 			throw new NodeOperationError(node, `Gate #${idx + 1} (${gate}): ${message}`, {
 				itemIndex,
@@ -93,16 +99,23 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 	return { qasm3, numQubits, numClbits, gateCount: gates.length };
 }
 
-export function handleCircuitImport(this: IExecuteFunctions, itemIndex: number): IDataObject {
-	const qasm3 = (this.getNodeParameter('qasm3Input', itemIndex) as string) ?? '';
-	// Require a real OpenQASM 3 version header, not just the substring anywhere in the text.
-	if (!/^\s*OPENQASM\s+3(\.\d+)?\s*;/m.test(qasm3)) {
+// A real OpenQASM 3 version header, not just the substring somewhere in the text. Every valid
+// program declares one, so this is safe to require on any path that hands a circuit to IBM.
+const OPENQASM3_HEADER = /^\s*OPENQASM\s+3(\.\d+)?\s*;/m;
+
+function requireQasm3Header(qasm3: string, label: string, node: INode, itemIndex: number): void {
+	if (!OPENQASM3_HEADER.test(qasm3)) {
 		throw new NodeOperationError(
-			this.getNode(),
-			'Input does not start with an OpenQASM 3 version header (expected a line like "OPENQASM 3.0;").',
+			node,
+			`${label} does not start with an OpenQASM 3 version header (expected a line like "OPENQASM 3.0;").`,
 			{ itemIndex },
 		);
 	}
+}
+
+export function handleCircuitImport(this: IExecuteFunctions, itemIndex: number): IDataObject {
+	const qasm3 = (this.getNodeParameter('qasm3Input', itemIndex) as string) ?? '';
+	requireQasm3Header(qasm3, 'Input', this.getNode(), itemIndex);
 	return { qasm3 };
 }
 
@@ -299,8 +312,13 @@ async function submitJob(
 	itemIndex: number,
 ): Promise<IDataObject> {
 	const backend = this.getNodeParameter('backend', itemIndex) as string;
-	const qasm3 = this.getNodeParameter('qasm3', itemIndex) as string;
+	const qasm3 = (this.getNodeParameter('qasm3', itemIndex) as string) ?? '';
 	const sessionId = this.getNodeParameter('submitSessionId', itemIndex, '') as string;
+
+	// Reject a circuit that is plainly not OpenQASM 3 before it costs a submission. IBM accepts
+	// the job, queues it, charges QPU time and only then fails it with a parse error, so catching
+	// it here saves the user both the wait and the quota.
+	requireQasm3Header(qasm3, 'OpenQASM 3 Circuit', this.getNode(), itemIndex);
 
 	// Parameters is a JSON field but an expression may resolve it to an object. Handle both, and
 	// treat empty string / {} as "no bindings" so a fixed circuit submits the same as before.
@@ -332,7 +350,7 @@ async function submitJob(
 		const precision = this.getNodeParameter('precision', itemIndex, 0) as number;
 		pub = buildPubData('estimator', qasm3, observables, parameters, 0, precision);
 	} else {
-		const shots = this.getNodeParameter('shots', itemIndex, 1024) as number;
+		const shots = clampCount(this.getNodeParameter('shots', itemIndex, 1024), 1024);
 		pub = buildPubData('sampler', qasm3, null, parameters, shots, 0);
 	}
 
@@ -389,6 +407,15 @@ export function isTerminalStatus(status: string): boolean {
 function clampSeconds(value: unknown, fallback: number): number {
 	const n = Number(value);
 	return Number.isFinite(n) && n >= 1 ? n : fallback;
+}
+
+// Same reasoning as clampSeconds, for the fields that carry a plain count. minValue in the UI is
+// only a hint, so an expression can deliver a string, a float, a negative or NaN. Passing any of
+// those straight through costs a rejected request, or in the case of shots a wasted submission.
+export function clampCount(value: unknown, fallback: number, max?: number): number {
+	const n = Math.floor(Number(value));
+	if (!Number.isFinite(n) || n < 1) return fallback;
+	return max !== undefined && n > max ? max : n;
 }
 
 // Connection-level failures that are safe to retry while polling.
@@ -451,7 +478,10 @@ async function getResults(
 		} catch (error) {
 			const remaining = deadline - Date.now();
 			if (remaining <= 0 || !isTransientPollError(error)) {
-				// Requests arrive here already wrapped by ibmQuantumApiRequest; wrap anything else.
+				// Requests arrive here already wrapped by ibmQuantumApiRequest, whose catch always
+				// returns a NodeApiError, so in practice the first arm always wins and the
+				// constructor call below is unreachable. Kept as a backstop in case the transport
+				// ever stops wrapping.
 				const wrapped =
 					error instanceof NodeApiError || error instanceof NodeOperationError
 						? error
@@ -486,7 +516,8 @@ export async function handleJob(
 	if (operation === 'submitEstimator') return submitJob.call(this, ctx, 'estimator', itemIndex);
 	if (operation === 'getResults') return getResults.call(this, ctx, itemIndex);
 	if (operation === 'list') {
-		const limit = this.getNodeParameter('limit', itemIndex, 50) as number;
+		// IBM caps GET /jobs at 200 and silently substitutes its default above that.
+		const limit = clampCount(this.getNodeParameter('limit', itemIndex, 50), 50, 200);
 		const filters = this.getNodeParameter('listFilters', itemIndex, {}) as IDataObject;
 		// exclude_params drops each job's circuit payload from the listing, matching the
 		// official client's default. The filter toggle brings it back when needed.
@@ -494,14 +525,18 @@ export async function handleJob(
 		const stringFilters: Array<[string, string]> = [
 			['backend', 'backend'],
 			['sessionId', 'session_id'],
-			['tag', 'tags'],
 			['createdAfter', 'created_after'],
 			['createdBefore', 'created_before'],
+			['program', 'program'],
 		];
 		for (const [param, qsKey] of stringFilters) {
 			const value = filters[param];
 			if (typeof value === 'string' && value.trim() !== '') qs[qsKey] = value.trim();
 		}
+		// tags is an array on the API (up to eight), so a comma-separated input becomes several
+		// values rather than one string that would never match. A single tag still sends one value.
+		const tagFilters = parseTagList(filters.tag);
+		if (tagFilters.length > 0) qs.tags = tagFilters;
 		if (filters.pending === 'pending') qs.pending = true;
 		else if (filters.pending === 'finished') qs.pending = false;
 		if (filters.sort === 'asc') qs.sort = 'ASC';
@@ -557,9 +592,11 @@ export async function handleSession(
 	if (operation === 'create') {
 		const mode = this.getNodeParameter('mode', itemIndex, 'batch') as string;
 		const backend = this.getNodeParameter('sessionBackend', itemIndex) as string;
-		const maxTtl = this.getNodeParameter('maxTtl', itemIndex, 28800) as number;
+		// Zero deliberately means "omit max_ttl and let IBM pick", so this coerces without
+		// substituting a fallback: anything not a positive number simply drops the field.
+		const maxTtl = Math.floor(Number(this.getNodeParameter('maxTtl', itemIndex, 28800)));
 		const body: IDataObject = { mode, backend };
-		if (maxTtl > 0) body.max_ttl = maxTtl;
+		if (Number.isFinite(maxTtl) && maxTtl > 0) body.max_ttl = maxTtl;
 		const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/sessions', body);
 		return { sessionId: response.id ?? null, mode, backend, response };
 	}
@@ -591,6 +628,7 @@ export async function handleAccount(
 	this: IExecuteFunctions,
 	ctx: RequestContext,
 	operation: string,
+	itemIndex: number,
 ): Promise<IDataObject> {
 	if (operation === 'getUsage') {
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/usage');
@@ -601,5 +639,7 @@ export async function handleAccount(
 	if (operation === 'getInstance') {
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instance');
 	}
-	throw new NodeOperationError(this.getNode(), `Unsupported account operation: ${operation}`);
+	throw new NodeOperationError(this.getNode(), `Unsupported account operation: ${operation}`, {
+		itemIndex,
+	});
 }

@@ -119,7 +119,15 @@ describe('IbmQuantumTrigger.poll query string', () => {
 	it('passes the tag filter through when set', async () => {
 		const { ctx, requests } = makeContext({ jobs: [] }, {}, 'manual', { tagFilter: ' vqe ' });
 		await poll(ctx);
-		expect(requests[0].qs).toEqual({ limit: 20, pending: false, exclude_params: true, tags: 'vqe' });
+		expect(requests[0].qs).toEqual({
+			limit: 20,
+			pending: false,
+			exclude_params: true,
+			tags: ['vqe'],
+		});
+		// IBM only recognises repeated keys for an array value; the default encoding is ignored
+		// and the filter would silently return every job.
+		expect(requests[0].arrayFormat).toBe('repeat');
 	});
 });
 

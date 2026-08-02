@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: read
+  # Lets the job mint the short-lived OIDC token npm exchanges for publish rights.
+  # Trusted publishing does not work without it.
   id-token: write
 
 jobs:
@@ -14,10 +16,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
-          # Node 20 reached end of life in April 2026; publish from the active LTS.
-          node-version: '22'
+          # Node 24, not 22, because trusted publishing needs npm 11.5.1 or newer and Node 22
+          # still ships npm 10.9.x. Node 24 ships 11.16. This only affects the publishing
+          # runtime; the package itself supports Node 22 and 24 alike.
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
           cache: npm
       - run: npm ci --ignore-scripts
@@ -30,8 +34,8 @@ jobs:
             echo "package.json version ($PKG) does not match the release tag ($TAG)"
             exit 1
           fi
-      # Auth uses an npm automation token; provenance still works because the repo is public
-      # and the job has id-token: write. prepublishOnly runs build, lint and test first.
-      - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Authentication is npm trusted publishing over OIDC, so there is no token to store or
+      # rotate. Provenance is generated automatically on this path, which is why --provenance
+      # is absent: passing it is unnecessary. prepublishOnly runs build, lint and test first.
+      # This requires the package's trusted publisher to be configured on npmjs.com first.
+      - run: npm publish --access public

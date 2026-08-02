@@ -48,6 +48,10 @@ export async function ibmQuantumApiRequest(
 		url: `${ctx.baseUrl}${endpoint}`,
 		json: true,
 		timeout: REQUEST_TIMEOUT_MS,
+		// IBM expects a repeated key for array query parameters (tags=a&tags=b), which is what the
+		// official client sends. n8n's default encodes them as tags[0]= or tags[]=, which the API
+		// does not recognise and silently ignores, so a tag filter would quietly return everything.
+		arrayFormat: 'repeat',
 	};
 	if (body !== undefined) options.body = body;
 	if (qs !== undefined) options.qs = qs;

@@ -31,6 +31,7 @@ describe('ibmQuantumApiRequest option building (TEST-05)', () => {
 			url: `${TEST_CTX.baseUrl}/backends`,
 			json: true,
 			timeout: 30000,
+			arrayFormat: 'repeat',
 		});
 		expect('body' in options).toBe(false);
 		expect('qs' in options).toBe(false);

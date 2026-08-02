@@ -24,6 +24,9 @@ export async function pollJobs(
 			// submissions cannot push a finished job out of it. exclude_params drops each
 			// job's circuit payload, matching the official client's listing default.
 			qs: { limit, pending: false, exclude_params: true, ...extraQs },
+			// Repeated keys for array values (tags=a&tags=b), the encoding IBM recognises.
+			// See the same note in transport.ts.
+			arrayFormat: 'repeat',
 			json: true,
 			timeout: 30000,
 		})) as IDataObject;

@@ -28,13 +28,13 @@ Verified by n8n, so it installs on n8n Cloud as well as self-hosted. Zero runtim
 
 ### What it does
 
-Three nodes ship in the package. In the n8n picker they carry an **(Unofficial)** suffix, as the verification ruleset requires.
+Three nodes ship in the package. In the n8n picker they carry an **(Unofficial)** marker, to keep them clearly distinct from anything IBM publishes.
 
 | node | type | what it is for |
 | :-- | :-- | :-- |
 | **IBM Quantum (Unofficial)** | action | Every operation below |
-| **IBM Quantum Trigger (Unofficial)** | polling trigger | Fires when a job reaches a terminal state |
-| **IBM Quantum Error Trigger (Unofficial)** | polling trigger | Fires only on failure or cancellation, with the reason |
+| **IBM Quantum (Unofficial) Trigger** | polling trigger | Fires when a job reaches a terminal state |
+| **IBM Quantum Error (Unofficial) Trigger** | polling trigger | Fires only on failure or cancellation, with the reason |
 
 Twenty four operations across five resources.
 
@@ -61,13 +61,15 @@ Twenty four operations across five resources.
 
 ### Use it as an AI Agent tool
 
-All three nodes set `usableAsTool`, so the action node can be attached to an n8n **AI Agent** as a tool and the model calls its operations directly. It is a good fit for the read paths, where the agent asks a question and gets a structured answer:
+The action node sets `usableAsTool`, so it can be attached to an n8n **AI Agent** as a tool and the model calls its operations directly. It is a good fit for the read paths, where the agent asks a question and gets a structured answer:
 
 - *"Which QPU has the shortest queue right now?"* &rarr; Backend, Get Least Busy
 - *"How much runtime is left on my instance?"* &rarr; Account, Get Usage
 - *"Did job d1abc finish?"* &rarr; Job, Get Status
 
 Submission works too, but the agent has to supply a circuit the backend accepts. On real hardware that means a transpiled ISA circuit, so pair it with a pre-built circuit rather than asking the model to write one. See [Transpilation](#transpilation).
+
+The two trigger nodes also set `usableAsTool`, because the n8n verification ruleset requires the property and the type allows only `true`. n8n then lists a tool variant of each trigger. Ignore those: a polling trigger has nothing for an agent to call. Attach the action node instead.
 
 <br>
 
@@ -97,7 +99,7 @@ On self-hosted n8n, open the community nodes screen and enter the package name `
 - An IBM Cloud account with access to the IBM Quantum Platform
 - An IBM Cloud API key
 - The Cloud Resource Name (CRN) of your Qiskit Runtime instance
-- n8n on a version that supports community nodes
+- n8n on a version that supports community nodes, running on Node.js 22 or 24
 
 <br>
 
@@ -162,7 +164,7 @@ Real hardware jobs can sit in the queue for minutes or hours. How you wait for t
 </p>
 <p align="center"><sub>The trigger fires when the job finishes, and Get Results returns the measurement counts at once.</sub></p>
 
-Set the cadence with the built-in Poll Times field and choose which terminal status fires it. The trigger only runs while its workflow is **active**; for a one-off check use Fetch Test Event. Each poll requests `pending=false` and `exclude_params=true`, so it scans only finished jobs and skips circuit payloads, which keeps it light and stops a burst of new submissions from pushing a finished job out of the scan window. If several workflows share one instance, set **Tags** on Submit and the matching **Tag** filter on the trigger, so each workflow reacts only to its own jobs.
+Set the cadence with the built-in Poll Times field and choose which terminal status fires it. The trigger only runs while its workflow is **active**; for a one-off check use Fetch Test Event. Each poll requests `pending=false` and `exclude_params=true`, so it scans only finished jobs and skips circuit payloads, which keeps it light and stops a burst of new submissions from pushing a finished job out of the scan window. If several workflows share one instance, set **Tags** on Submit and the matching **Tags** filter on the trigger, so each workflow reacts only to its own jobs. The filter takes several comma-separated tags, and a job must carry all of them to match.
 
 For production, pair it with the **IBM Quantum Error Trigger**, which fires only on failure or cancellation: a queue timeout, a calibration fault, a manual cancel from the IBM dashboard. It emits `reason`, `reasonCode` and `reasonSolution` from the job's state, so a second workflow can page an engineer or fall back to a simulator instead of stalling.
 
@@ -196,26 +198,32 @@ The Circuit Build operation takes a gate list and emits an OpenQASM 3 string. Ea
 
 ### Supported gates
 
-| gate | qubits | params | what it is |
-| :-- | :-- | :-- | :-- |
-| `id` | 1 | 0 | Identity |
-| `x` `y` `z` | 1 | 0 | Pauli gates |
-| `h` | 1 | 0 | Hadamard |
-| `s` `sdg` | 1 | 0 | Phase &pi;/2 and its inverse |
-| `t` `tdg` | 1 | 0 | Phase &pi;/4 and its inverse |
-| `rx` `ry` `rz` | 1 | 1 | Rotation about X, Y, Z |
-| `p` | 1 | 1 | Phase |
-| `U` | 1 | 3 | Generic single-qubit unitary (theta, phi, lambda) |
-| `cx` | 2 | 0 | CNOT, control first |
-| `cz` | 2 | 0 | Controlled-Z |
-| `swap` | 2 | 0 | Swap |
-| `crx` `cry` `crz` | 2 | 1 | Controlled rotation, control first |
-| `ccx` | 3 | 0 | Toffoli, two controls then the target |
-| `measure` | 1 | 0 | Writes to the classical bit you name |
-| `reset` | 1 | 0 | Reset to \|0&rang; |
-| `barrier` | any | 0 | Optimization barrier; omit qubits for the whole register |
+| gate | qubits | params | what it is | on IBM hardware |
+| :-- | :-- | :-- | :-- | :-- |
+| `id` | 1 | 0 | Identity | accepted, emitted as nothing, see below |
+| `x` | 1 | 0 | Pauli X | runs as-is |
+| `y` `z` | 1 | 0 | Pauli Y, Z | transpile first |
+| `h` | 1 | 0 | Hadamard | transpile first |
+| `s` `sdg` | 1 | 0 | Phase &pi;/2 and its inverse | transpile first |
+| `t` `tdg` | 1 | 0 | Phase &pi;/4 and its inverse | transpile first |
+| `rx` `rz` | 1 | 1 | Rotation about X, Z | runs as-is |
+| `ry` | 1 | 1 | Rotation about Y | transpile first |
+| `p` | 1 | 1 | Phase | transpile first |
+| `u` | 1 | 3 | Generic single-qubit unitary (theta, phi, lambda) | transpile first |
+| `cz` | 2 | 0 | Controlled-Z | runs as-is |
+| `cx` | 2 | 0 | CNOT, control first | transpile first |
+| `swap` | 2 | 0 | Swap | transpile first |
+| `crx` `cry` `crz` | 2 | 1 | Controlled rotation, control first | transpile first |
+| `ccx` | 3 | 0 | Toffoli, two controls then the target | transpile first |
+| `measure` | 1 | 0 | Writes to the classical bit you name | runs as-is |
+| `reset` | 1 | 0 | Reset to \|0&rang; | runs as-is |
+| `barrier` | any | 0 | Optimization barrier; omit qubits for the whole register | directive, always fine |
+
+**Runs as-is** means the instruction is in the backend's own `basis_gates` and reaches the target unchanged, so a circuit made only of those needs no transpiler. On a Heron processor that set is `x`, `rx`, `rz`, `cz`, plus measure, reset and barrier, which is enough to build real circuits: see [Building an ISA circuit directly in the node](#building-an-isa-circuit-directly-in-the-node). Everything marked **transpile first** is defined by the OpenQASM 3 standard library in terms of the builtin `U`, or is a two-qubit gate the chip does not implement, and IBM rejects it with `the instruction ... is not supported`. Check any given backend with Backend &rsaquo; Get Configuration, which returns its `basis_gates` directly.
 
 The U gate is emitted as the OpenQASM 3 builtin `U`, uppercase. A lowercase `u` is not defined in `stdgates.inc` and IBM's parser rejects it.
+
+Identity is the one gate that is accepted and then dropped. `stdgates.inc` defines `id` as `U(0, 0, 0)`, and IBM's target refuses the builtin `U`, so a circuit containing an identity failed every time with "the instruction u is not supported" even though the backend lists `id` among its basis gates. Since identity is the no-op, omitting it leaves a mathematically identical circuit that runs. Its operands are still validated, so a bad index is still an error rather than a silent drop.
 
 Bad input is caught at build time, not at IBM: the wrong number of qubits or parameters, an index outside the register, a non-numeric value, a measure aimed past the classical register, or a zero, negative or non-integer register size. The error names the gate and what it expected.
 
@@ -230,11 +238,28 @@ Submit is split per primitive, because their inputs differ.
 - **Submit to Sampler** returns measurement counts. Set **Shots**.
 - **Submit to Estimator** returns expectation values. Set **Observables** to a Pauli string whose length matches the qubit count (`ZZ` for two qubits) or an array of them, pick a **Resilience Level**, and optionally a **Precision**.
 
-Both share the error-suppression toggles that matter on hardware: **Dynamical Decoupling**, **Gate Twirling**, **Measurement Twirling**. For parametrized circuits, **Parameters** takes a JSON object binding names to values, e.g. `{"theta": 1.5708}`. **Additional Options** is a JSON escape hatch merged into the primitive `options`, e.g. `{"default_shots": 4096}`.
+Both share the error-suppression toggles that matter on hardware: **Dynamical Decoupling**, **Gate Twirling**, **Measurement Twirling**. Leave Gate Twirling off for a circuit containing fractional gates, meaning a parametrised `rx` or `rzz`, which includes anything Qiskit transpiles for a Heron processor: IBM refuses that combination with "gate twirling does not support fractional gates". The other two have no such restriction. For parametrized circuits, **Parameters** takes a JSON object binding names to values, e.g. `{"theta": 1.5708}`. **Additional Options** is a JSON escape hatch merged into the primitive `options`, e.g. `{"default_shots": 4096}`.
 
 Both also accept **Tags** (comma separated, stored on the job and usable as a filter in Job List and in both triggers) and a **Private** toggle that hides the job's inputs and results from collaborators, on plans that support private jobs.
 
-**Bit order.** Sampler counts follow the classical register: `c[0]` is the rightmost bit of each bitstring, the standard Qiskit convention. Samples arrive as hex and are decoded with BigInt, so registers wider than 53 bits keep every bit instead of silently collapsing distinct outcomes.
+### Finding jobs again
+
+**Job List** returns recent jobs newest first, capped at IBM's maximum of 200 per call, and takes a **Filters** collection:
+
+| filter | what it narrows to |
+| :-- | :-- |
+| **Backend** | Jobs that ran on one device |
+| **Program** | Sampler jobs or Estimator jobs |
+| **Tags** | Jobs carrying every tag you list, comma separated, up to the eight the API accepts |
+| **Session ID** | Jobs that ran inside one session or batch |
+| **Status** | All, only finished, or only queued and running |
+| **Created After** / **Created Before** | A time window |
+| **Sort** / **Offset** | Order and paging |
+| **Include Circuit Params** | Brings each job's submitted circuit back into the response, which is omitted by default to keep listings small |
+
+Tags are the practical way to find your own work on a shared instance: set them on Submit, filter on them here and in both triggers.
+
+**Bit order.** Sampler counts follow the classical register: `c[0]` is the rightmost bit of each bitstring, the standard Qiskit convention. Samples arrive as hex and are decoded with BigInt, so registers wider than 53 bits keep every bit instead of silently collapsing distinct outcomes. A sample the parser cannot read is dropped rather than folded into a neighbouring outcome, and the pub then carries `unparsedSamples` so the gap between `counts` and `shots` is visible instead of silent.
 
 <br>
 
@@ -256,6 +281,33 @@ Transpile your circuits for the target before submitting a primitive query.
 ```
 
 That is not a node bug. The node builds, submits and reads the job correctly; the hardware refuses a non-ISA circuit.
+
+### Building an ISA circuit directly in the node
+
+Transpiling is the general answer, but for small circuits you can skip it entirely: build straight from the native gate set with the Circuit Build operation. The palette already contains everything a Heron processor runs, so an ISA circuit needs no external tooling at all.
+
+Two identities do most of the work:
+
+```
+H            = rz(pi/2) . rx(pi/2) . rz(pi/2)      (up to a global phase)
+CNOT(c -> t) = H(t) . cz(c, t) . H(t)
+```
+
+A Bell state built that way, with 13 gate entries and no Qiskit anywhere, runs as-is:
+
+| gate | qubits | parameters |
+| :-- | :-- | :-- |
+| RZ, RX, RZ | `0` | `1.5707963267948966` each |
+| RZ, RX, RZ | `1` | `1.5707963267948966` each |
+| CZ | `0,1` | |
+| RZ, RX, RZ | `1` | `1.5707963267948966` each |
+| Barrier | `0,1` | |
+| Measure | `0` | Classical Bit `0` |
+| Measure | `1` | Classical Bit `1` |
+
+On `ibm_marrakesh` over 2048 shots that gives 51.1% `00` and 46.2% `11`, with 2.7% leaking into `01` and `10` from readout noise: the correlation an entangled pair should show.
+
+Gates that are safe to use this way: **X, RX, RZ, CZ, Reset, Barrier, Measure**. A Heron backend also lists `sx` and `rzz` among its basis gates, but neither is offered here: `sx` has no OpenQASM 3 spelling the palette can emit without going through the builtin `U`, and `rzz` is rejected by IBM's OpenQASM parser outright, verified against `ibm_kingston`. `rx` covers what `sx` would give you. Everything else in the palette (`h`, `cx`, `u`, `swap`, `ccx`, the daggered gates) is defined by the OpenQASM 3 standard library in terms of the builtin `U`, which hardware rejects, so those need a transpiler pass first. Identity is a special case: it is accepted but emits nothing, because `stdgates.inc` defines it as `U(0, 0, 0)` and it would otherwise fail every job it appears in.
 
 ### How to transpile, free, on any plan
 
@@ -348,7 +400,7 @@ All four run in CI on Node 22 and 24. `isolated-vm`, a native transitive dev dep
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) for the full workflow, [SECURITY.md](SECURITY.md) for reporting a vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
-**Releasing.** `publish.yml` publishes to npm with provenance when a GitHub release is created. It verifies the `package.json` version matches the release tag before publishing, authenticates with an npm automation token stored as the `NPM_TOKEN` secret, and gets provenance because the repo is public and the job holds `id-token: write`.
+**Releasing.** `publish.yml` publishes to npm when a GitHub release is created, after verifying that the `package.json` version matches the release tag. Authentication is npm **trusted publishing** over OIDC: the job holds `id-token: write` and exchanges a short-lived, workflow-scoped credential for publish rights, so there is no token stored in the repository and nothing to rotate. Provenance attestations are generated automatically on that path. The job runs on Node 24 rather than 22 because trusted publishing needs npm 11.5.1 or newer and Node 22 still ships npm 10.9.x.
 
 <br>
 
@@ -356,7 +408,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT
 
 ## Notes on the live API
 
-Request and response shapes follow the published Qiskit Runtime REST API reference. The job body sends the primitive as `program_id`, the circuit inside a PUB, and `version` 2 in `params`, with `resilience_level` at the params level for the Estimator. Sampler results are read from `results[i].data[register].samples` as hex strings. The least busy backend is chosen from the backends list, which already carries status, qubit count and queue length per device. Every request carries a 30 second timeout so a hung connection cannot stall an execution.
+Request and response shapes follow the published Qiskit Runtime REST API reference. The job body sends the primitive as `program_id`, the circuit inside a PUB, and `version` 2 in `params`, with `resilience_level` at the params level for the Estimator. Sampler results are read from `results[i].data[register].samples` as hex strings. The least busy backend is chosen from the backends list, which already carries status, qubit count and queue length per device. Array query parameters are sent as repeated keys (`tags=a&tags=b`), the form the API recognises; the default bracket encoding is ignored by IBM, which would make a tag filter quietly return everything. Every request carries a 30 second timeout so a hung connection cannot stall an execution.
 
 <br>
 
@@ -364,7 +416,7 @@ Request and response shapes follow the published Qiskit Runtime REST API referen
 
 ## License
 
-[MIT](LICENSE) &nbsp;&#183;&nbsp; [contact@tuguidragos.com](mailto:contact@tuguidragos.com)
+<p align="center"><a href="LICENSE">MIT</a> &nbsp;&#183;&nbsp; <a href="mailto:contact@tuguidragos.com">contact@tuguidragos.com</a></p>
 
 <br>
 

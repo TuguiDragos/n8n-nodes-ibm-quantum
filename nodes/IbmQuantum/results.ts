@@ -45,21 +45,39 @@ function parseSamplerPub(data: IDataObject, preferredRegister?: string): IDataOb
 			? preferredRegister
 			: registerNames.find(hasSamples);
 
+	// Unreachable from parseResults, which only calls this once it has already proved some value in
+	// `data` carries a samples array, using the same predicate hasSamples applies. Kept so the
+	// function stays correct on its own terms if it is ever exported or called from somewhere else.
 	if (!registerName) return { register: null, counts: {}, shots: 0 };
 
 	const register = data[registerName] as IDataObject;
+	// Same reason: hasSamples already established this is an array.
 	const samples = (register.samples as string[]) ?? [];
 	const numBits = (register.num_bits as number) ?? inferNumBits(samples);
+	const counts = samplesToCounts(samples, numBits);
+
+	// A sample the hex parser cannot read is dropped rather than folded into a wrong bitstring,
+	// which would corrupt a neighbouring outcome. Dropping it silently would leave counts summing
+	// to less than shots with nothing to explain the gap, so report the shortfall when there is
+	// one. IBM has never returned an unreadable sample in practice; this makes it visible if it
+	// ever does, instead of quietly understating an outcome.
+	const counted = Object.values(counts as Record<string, number>).reduce((sum, n) => sum + n, 0);
+	const unparsed = samples.length - counted;
+
 	return {
 		register: registerName,
 		numBits,
 		shots: samples.length,
-		counts: samplesToCounts(samples, numBits),
+		counts,
+		...(unparsed > 0 ? { unparsedSamples: unparsed } : {}),
 	};
 }
 
 export function parseResults(response: IDataObject, preferredRegister?: string): IDataObject {
-	const results = (response.results as IDataObject[]) ?? [];
+	// Guard on the shape, not just on null. `?? []` let a non-array `results` through to .map and
+	// crashed with a bare TypeError; the caller still returns the untouched body as `raw`, so
+	// degrading to zero pubs loses nothing and keeps the failure readable.
+	const results = Array.isArray(response.results) ? (response.results as IDataObject[]) : [];
 	const pubs = results.map((pub) => {
 		const data = (pub.data as IDataObject) ?? {};
 		const isSampler = Object.values(data).some(
