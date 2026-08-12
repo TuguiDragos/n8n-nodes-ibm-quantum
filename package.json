@@ -68,12 +68,12 @@
     "n8n-workflow": "*"
   },
   "devDependencies": {
-    "@n8n/eslint-plugin-community-nodes": "^0.27.0",
+    "@n8n/eslint-plugin-community-nodes": "^0.28.0",
     "@types/node": "^26.1.2",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "9.29.0",
     "eslint-plugin-n8n-nodes-base": "^1.16.7",
-    "n8n-workflow": "2.32.1",
+    "n8n-workflow": "2.34.2",
     "prettier": "^3.9.6",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.65.0",
