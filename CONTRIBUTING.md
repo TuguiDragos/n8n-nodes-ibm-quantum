@@ -28,7 +28,9 @@ npm install --ignore-scripts
 | `npm run test:coverage` | The same suite with coverage, checked against the thresholds in `vitest.config.mts` |
 | `npm run scan` | The official n8n community package scanner, run before submitting for verification |
 
-CI runs `lint`, `build` and `test:coverage` on Node 22 and 24. `scan` is not part of CI because it inspects the published package on npm, so it only makes sense once a version is out. Please make sure the first three pass before opening a pull request.
+CI runs `lint`, `build` and `test:coverage` on Node 22 and 24, and coverage is a gate rather than a report: the thresholds in `vitest.config.mts` are 100 for statements, branches, functions and lines, so a new line without a test fails the build. Please make sure all 3 pass before opening a pull request.
+
+`scan` inspects the package already published on npm, so it cannot run on a pull request. Run it periodically instead, because the n8n verification ruleset changes independently of this repository and has already broken a release that was compliant when it shipped.
 
 ## Style
 

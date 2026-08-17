@@ -34,7 +34,7 @@ function inferNumBits(samples: string[]): number {
 }
 
 // Bit order follows the classical register: c[0] is the right most bit.
-function parseSamplerPub(data: IDataObject, preferredRegister?: string): IDataObject {
+export function parseSamplerPub(data: IDataObject, preferredRegister?: string): IDataObject {
 	const registerNames = Object.keys(data);
 	const hasSamples = (name: string): boolean => {
 		const register = data[name] as IDataObject | undefined;
@@ -45,14 +45,13 @@ function parseSamplerPub(data: IDataObject, preferredRegister?: string): IDataOb
 			? preferredRegister
 			: registerNames.find(hasSamples);
 
-	// Unreachable from parseResults, which only calls this once it has already proved some value in
-	// `data` carries a samples array, using the same predicate hasSamples applies. Kept so the
-	// function stays correct on its own terms if it is ever exported or called from somewhere else.
+	// parseResults only calls this once it has proved some value in `data` carries a samples array,
+	// so this guard is for direct callers, which is also how it is tested.
 	if (!registerName) return { register: null, counts: {}, shots: 0 };
 
 	const register = data[registerName] as IDataObject;
-	// Same reason: hasSamples already established this is an array.
-	const samples = (register.samples as string[]) ?? [];
+	// hasSamples already established this is an array, so no fallback is needed here.
+	const samples = register.samples as string[];
 	const numBits = (register.num_bits as number) ?? inferNumBits(samples);
 	const counts = samplesToCounts(samples, numBits);
 

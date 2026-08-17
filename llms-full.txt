@@ -1,0 +1,532 @@
+# n8n-nodes-ibm-quantum: complete reference for AI assistants
+
+This file is the machine-oriented reference for the `n8n-nodes-ibm-quantum` package: every node,
+operation, parameter (with its internal name), output shape and known hardware pitfall, stated
+plainly so an LLM can configure the nodes or generate n8n workflow JSON without guessing.
+It is generated from the source of version 0.4.0 (August 2026). The human-oriented documentation
+is README.md; release history is CHANGELOG.md.
+
+Unofficial, community-maintained package. Not affiliated with, endorsed by, or sponsored by IBM.
+
+## Package facts
+
+- npm package: `n8n-nodes-ibm-quantum` (verified n8n community node; installable on n8n Cloud and
+  self-hosted n8n via Settings, Community nodes).
+- Purpose: build, run and retrieve quantum circuits on the IBM Quantum Platform (IBM Cloud) from
+  n8n, via the Qiskit Runtime REST API. IBM renamed the service "IBM Quantum Compute Service" in
+  July 2026; the endpoints, headers and payloads are unchanged.
+- Zero runtime dependencies. No Qiskit, no Python. Circuits travel as OpenQASM 3 strings, or as
+  base64 QPY when you have Qiskit available to produce it.
+- Requires Node.js 22 or 24 on the n8n host. Targets the current IBM Quantum Platform
+  (quantum.cloud.ibm.com), NOT the retired legacy platform (api.quantum-computing.ibm.com).
+- Repository: https://github.com/TuguiDragos/n8n-nodes-ibm-quantum
+
+## The 3 nodes
+
+n8n workflow JSON uses these exact `type` strings (community packages prefix the package name):
+
+| node (UI display name) | type string | kind |
+| :-- | :-- | :-- |
+| IBM Quantum (Unofficial) | `n8n-nodes-ibm-quantum.ibmQuantum` | action node, all operations |
+| IBM Quantum (Unofficial) Trigger | `n8n-nodes-ibm-quantum.ibmQuantumTrigger` | polling trigger, fires when a job reaches a terminal state |
+| IBM Quantum Error (Unofficial) Trigger | `n8n-nodes-ibm-quantum.ibmQuantumErrorTrigger` | polling trigger, fires only on failure or cancellation, with the reason |
+
+The action node is on `typeVersion: 2`; use that for anything new. Version 1 still loads unchanged,
+and differs in exactly one parameter: the session mode is `mode` on version 1 and `sessionMode` on
+version 2. Both triggers are `typeVersion: 1`. All three require the `ibmQuantumApi` credential.
+The action node has one main input and one main output; the triggers have no input and one output.
+
+Only the action node is exposed as an AI Agent tool. The triggers deliberately are not: a polling
+trigger cannot be invoked by an agent, and the n8n verification ruleset rejects the property on
+trigger nodes.
+
+## Credential: `ibmQuantumApi` (display name "IBM Quantum API")
+
+| field (internal name) | type | default | meaning |
+| :-- | :-- | :-- | :-- |
+| `apiKey` | string (password) | none | IBM Cloud API key from https://cloud.ibm.com/iam/apikeys. Exchanged automatically for a short-lived IAM bearer token (POST https://iam.cloud.ibm.com/identity/token, grant type `urn:ibm:params:oauth:grant-type:apikey`). n8n caches the token and refreshes it on 401. |
+| `instanceCrn` | string | none | Cloud Resource Name of the Qiskit Runtime instance, from https://quantum.cloud.ibm.com/instances. Starts with `crn:v1`. Sent as the `Service-CRN` header on every request. |
+| `region` | options: `us-east`, `eu-de` | `us-east` | Must match the region the instance was created in. Picks the API host: `us-east` maps to `https://quantum.cloud.ibm.com/api/v1`, `eu-de` maps to `https://eu-de.quantum.cloud.ibm.com/api/v1`. A mismatch yields 404s or an empty backends list. These are the only two regions IBM operates. |
+| `apiVersion` | string | `2026-04-15` | Date sent as the `IBM-API-Version` header; selects the response schema. |
+
+The credential ships a connection test (GET `/backends`) that validates all four fields at once.
+There is also a hidden `sessionToken` field the token exchange fills in; never set it manually.
+
+**API version validation.** The node checks this field before every run. A value that is not a real
+YYYY-MM-DD date (including an empty one, or an impossible date like 2026-02-31) fails locally with a
+clear message, because IBM would otherwise reject the request with an error naming neither the field
+nor the cause. A well-formed date older than `2026-04-15` is accepted and logged as a warning: those
+versions still answer today. As of August 2026, `2026-04-15` is the only version IBM does not list
+as deprecated, and every earlier one has a published sunset during 2027.
+
+## Action node: resources and operations
+
+Top-level parameters on every action node: `resource` (default `job`) and `operation`. Six
+resources: `account`, `backend`, `circuit`, `job`, `session`, `workload`. An unknown resource or
+operation fails with a clear error rather than falling through to another handler.
+
+Parameter names below are the internal names used in workflow JSON. "raw IBM body" means the API
+response is passed through unchanged.
+
+### Resource: `account`
+
+| operation | HTTP call | parameters | output |
+| :-- | :-- | :-- | :-- |
+| `getUsage` (default) | GET /instances/usage | none | raw IBM body: period usage, e.g. `usage_consumed_seconds`, `usage_limit_seconds` |
+| `getInstance` | GET /instance | none | raw IBM body: instance details (plan, CRN, name) |
+| `getConfiguration` | GET /instances/configuration | none | raw IBM body: instance configuration, including the cost limit |
+| `getAnalytics` | GET /analytics/usage | `analyticsFilters` | raw IBM body: usage totals |
+| `getAnalyticsGrouped` | GET /analytics/usage_grouped | `analyticsFilters`, `groupBy` | raw IBM body: usage grouped by the chosen key |
+| `getAnalyticsByDate` | GET /analytics/usage_grouped_by_date | `analyticsFilters` | raw IBM body: a usage time series. The API requires `group_by`, and accepts only `instance`, so the node always sends that. |
+| `getAnalyticsFilters` | GET /analytics/filters | none | raw IBM body: the filter values this caller may use |
+| `getApiVersions` | GET /versions | none | raw IBM body: `{ versions: [{ version, status, sunset_date? }] }`. Use it to confirm which `IBM-API-Version` dates are still live before changing the credential. |
+| `setCostLimit` | PUT /instances/configuration | `instanceLimit` | `{ instanceLimit }` |
+
+`groupBy` options: `backend` (default), `instance`, `plan`, `subscription_id`, `user_id`.
+
+`analyticsFilters` collection keys: `backend`, `instance`, `plan`, `subscriptionId`, `userId` (each
+comma-separated for several values, sent as repeated query keys), `intervalStart` and `intervalEnd`
+(dateTime, the reporting window), and `simulators` (boolean, default true; only the opt-out is sent
+because the API already defaults to true).
+
+`instanceLimit` is the total runtime seconds the instance may spend before IBM cancels running jobs
+with "Ran too long". Zero, or any non-positive value, sends an explicit `null` and removes the limit.
+
+### Resource: `backend`
+
+| operation | parameters | output |
+| :-- | :-- | :-- |
+| `list` (default) | none | raw IBM body: `{ devices: [ { name, qubits, is_simulator, status: { name }, queue_length, ... } ] }` |
+| `getConfiguration` | `backendName` (string, required) | raw IBM body; includes `basis_gates` (the native gate set) and the coupling map |
+| `getDefaults` | `backendName` (string, required) | raw IBM body: default settings and calibration data. Simulators may not support it. |
+| `getProperties` | `backendName` (string, required) | raw IBM body: calibration data (T1/T2, gate errors, readout errors) |
+| `getStatus` | `backendName` (string, required) | raw IBM body: operational state and queue length |
+| `getLeastBusy` | `minQubits` (number, default 0; 0 disables the filter), `includeSimulators` (boolean, default false) | `{ leastBusy: string\|null, queueLength: number\|null, candidates: [{ name, queueLength, qubits, status }] }` |
+
+`getLeastBusy` is computed client-side from the backends list: it keeps devices whose status is
+`online`, filters simulators (unless included) and devices smaller than `minQubits` or with an
+unknown qubit count, then sorts by queue length (unknown queue length sorts last). `leastBusy` is
+`null` when nothing qualifies, so handle that case.
+
+### Resource: `circuit`
+
+Both circuit operations are local; they make no API call and need no credential values.
+
+`build` (default) parameters:
+- `numQubits` (number, required, default 2): quantum register size, min 1.
+- `numClbits` (number, default 2): classical register size, min 0.
+- `gates` (fixedCollection, entries under key `gate`, ordered): each entry has
+  - `gate` (options, default `h`): one of the palette gates below.
+  - `qubits` (string, required): comma-separated qubit indices, e.g. `0` or `0,1`. For controlled
+    gates the control comes FIRST and the target LAST (`0,1` means control 0, target 1). Toffoli
+    takes `control,control,target`. Empty is allowed only for a full-width barrier.
+  - `params` (string, only for `rx`,`ry`,`rz`,`p`,`crx`,`cry`,`crz`,`u`): comma-separated angles in
+    radians. One value for R and Phase gates; exactly three (theta, phi, lambda) for `u`.
+  - `clbit` (number, only for `measure`, default 0): target classical bit.
+
+Output: `{ qasm3: string, numQubits, numClbits, gateCount }`.
+
+All input is validated at build time (wrong arity, out-of-range index, non-numeric value, measure
+past the classical register, invalid register sizes) and fails with a message naming the gate.
+
+`import` parameters: `qasm3Input` (string, required). Validates the program starts with an
+OpenQASM 3 version header (`OPENQASM 3.0;`) and passes it through. Output: `{ qasm3: string }`.
+This operation is OpenQASM 3 only; to submit QPY, paste it straight into the submit operation.
+
+### Resource: `job`
+
+3 programs submit a job: `submitSampler` (the default), `submitEstimator` and
+`submitNoiseLearner`. They share the job envelope described first, then differ.
+
+Shared by all three:
+
+| parameter | type | default | notes |
+| :-- | :-- | :-- | :-- |
+| `backend` | string, required | none | Device that runs the circuit. The circuit must already be ISA (transpiled) for THIS backend; see "Hardware reality" below. |
+| `circuitFormat` | options `qasm3` or `qpy` | `qasm3` | Which field below carries the circuit. A workflow saved before this parameter existed has no value stored and behaves as `qasm3`. |
+| `qasm3` | string, required when format is `qasm3` | none | The OpenQASM 3 circuit. Typically an expression, e.g. `={{ $('Build').item.json.qasm3 }}`. Must start with an `OPENQASM 3` header or the node rejects it locally, before any quota is spent. |
+| `qpyCircuit` | string, required when format is `qpy` | none | The circuit as base64-encoded QPY. Must begin with `UUlTS0lU`, the base64 of the QPY magic bytes, or the node rejects it locally. Produce it with `qiskit.qpy.dump(circuit, buffer)` into a BytesIO and base64 the bytes. |
+| `logLevel` | options `''`, `critical`, `error`, `warning`, `info`, `debug` | `''` | Sent as `log_level`; raises the verbosity IBM records, readable later with Get Logs. Omitted when empty. |
+
+Sampler and Estimator only (the noise learner takes bare circuits, not PUBs, and its options object
+is declared `additionalProperties: false`, so none of these may be sent with it):
+
+| parameter | type | default | notes |
+| :-- | :-- | :-- | :-- |
+| `parameters` | json | `''` | Bindings for a parametrized circuit: JSON object mapping parameter names to values or arrays, e.g. `{"theta": 1.5708}`. Empty string or `{}` means no bindings. |
+| `dynamicalDecoupling` | boolean | false | Sends `options.dynamical_decoupling.enable = true`. Safe on any circuit. |
+| `twirlingGates` | boolean | false | Sends `options.twirling.enable_gates = true`. MUST stay off for circuits containing fractional gates (a parametrised `rx` or `rzz`, which includes anything Qiskit transpiles for a Heron processor); IBM fails the job with "gate twirling does not support fractional gates". |
+| `twirlingMeasure` | boolean | false | Sends `options.twirling.enable_measure = true`. No fractional-gate restriction. |
+| `submitSessionId` | string | `''` | Session or batch ID from Session Create; runs the job inside that reservation. Sent as top-level `session_id`. |
+| `maxCost` | number | 0 | Maximum runtime seconds before IBM cancels the job, sent as `cost`. Zero omits the field and lets the program decide. IBM allows at most 10800 (3 hours) and the node clamps to that. Worth setting on the Open plan, where the whole allowance is 600 seconds. |
+| `jobTags` | string | `''` | Comma-separated tags stored on the job (max 8). The practical way to find jobs again: filter on them in Job List, Workload List and both triggers. |
+| `privateJob` | boolean | false | Marks the job private (inputs and results hidden from other collaborators, and deleted after reading). Needs a plan that supports private jobs. |
+| `additionalOptions` | json | `{}` | Escape hatch merged into the primitive `options` object, e.g. `{"default_shots": 4096}`. Must be a JSON object. |
+
+`submitSampler` only: `shots` (number, default 1024).
+`submitEstimator` only:
+- `observables` (json, default `"ZZ"`): a Pauli string over letters I, X, Y, Z (one letter per
+  qubit), an array of such strings, or a coefficient map like `{"ZI": 1.0, "IZ": 0.5}`. Letters are
+  validated locally; length against qubit count is validated by IBM at submit time.
+- `resilienceLevel` (options 0/1/2, default 1): error-mitigation level.
+- `precision` (number, default 0): target precision; 0 means backend default.
+
+Submit output: `{ jobId, backend, primitive, sessionId: string|null, response }` where `response`
+is the raw IBM body. Submission returns immediately; the job runs asynchronously, so pair it with
+`getResults` or the trigger node.
+
+`submitNoiseLearner` only: `noiseLearnerOptions` (collection) with `maxLayersToLearn`,
+`numRandomizations`, `shotsPerRandomization` (numbers; zero omits the field and leaves the choice
+to IBM), `layerPairDepths` (comma-separated integers, sent as the array `layer_pair_depths`) and
+`twirlingStrategy` (`active`, `active-accum`, `active-circuit`, `all`). The program characterises
+the noise on the backend's entangling layers and returns learned Pauli-Lindblad error channels
+rather than counts, so read it with Get Results and inspect `raw`. Raising the randomizations and
+shots is what makes a learning job expensive, which matters on the Open plan.
+
+Request body sent: `{ program_id: "sampler"|"estimator"|"noise-learner", backend, params: {...},
+session_id?, tags?, private?, cost?, log_level? }`. For Sampler and Estimator, `params` is
+`{ version: 2, pubs: [pub], options?, resilience_level? }` and the node submits exactly one PUB per
+job: Sampler PUB is `[circuit, parameters, shots]`, Estimator PUB is
+`[circuit, observables, parameters?, precision?]`. For the noise learner, `params` is
+`{ version: 2, circuits: [circuit], options? }`.
+
+Other job operations:
+
+| operation | parameters | output |
+| :-- | :-- | :-- |
+| `getStatus` | `jobId` (required) | raw IBM job body; status lives at `state.status` (e.g. `Queued`, `Running`, `Completed`, `Failed`, `Cancelled`), failure details at `state.reason`, `state.reason_code`, `state.reason_solution` |
+| `getResults` | `jobId` (required), `pollInterval` (seconds, default 5), `maxWait` (seconds, default 300), `registerName` (string, default '' meaning auto-detect) | see "Results format" below. BLOCKS the execution while polling, so prefer the trigger pattern for long hardware queues. Transient errors (429, 5xx, dropped connections) are retried until `maxWait`. |
+| `getLogs` | `jobId` | `{ jobId, logs }` (logs is plain text) |
+| `getMetrics` | `jobId` | raw IBM body: timestamps and usage, including `qpu_charge_time_seconds`. Note that `bss`, `usage.quantum_seconds` and `usage.seconds` were removed by IBM in API version 2026-03-15. |
+| `list` | `limit` (default 50, max 200, IBM's hard cap), `listFilters` (collection, below) | raw IBM body: `{ jobs: [...], count?, limit?, offset? }`, newest first by default |
+| `listTags` | `tagSearch` (string, optional substring) | raw IBM body: the tags in use on your jobs. The API requires both `type` and `search`, so the node always sends `type=job` and an empty search when you give none. |
+| `updateTags` | `jobId`, `jobTags` | `{ jobId, tags }`. PUT replaces the FULL tag list; empty input clears all tags. |
+| `cancel` | `jobId` | `{ jobId, cancelled: true }` |
+| `delete` | `jobId` | `{ jobId, deleted: true }` (permanent) |
+
+`listFilters` collection keys: `backend` (string), `createdAfter` and `createdBefore` (dateTime),
+`includeParams` (boolean, default false; set true to include each job's submitted circuit),
+`offset` (number, paging), `program` ('' | `sampler` | `estimator`), `sessionId` (string),
+`sort` (`desc` newest first | `asc`), `pending` (`all` | `finished` | `pending`),
+`tag` (comma-separated tags; a job must carry ALL of them; max 8).
+
+### Resource: `workload`
+
+One operation, `list` (GET /workloads). Lists jobs, sessions and batches together, which Job List
+cannot do. Parameters:
+
+- `limit` (number, default 50, max 50). Note this endpoint caps at 50, unlike Job List which allows 200.
+- `workloadFilters` collection: `backend` (string), `createdAfter` and `createdBefore` (dateTime),
+  `next` and `previous` (cursor strings from a previous response; this listing pages by cursor, not
+  by offset), `search` (free text matched against workload IDs and tags), `workloadMode`
+  ('' | `job` | `session` | `batch`, sent as `mode`), `status` (multi-select of `pending`,
+  `in_progress`, `failed`, `completed`, `canceled`), `tags` (comma-separated), `sort`
+  (`-createdAt` newest first, the node's default, or `createdAt`).
+
+The node always sends a sort value. Left alone, the API returns oldest first, which does not match
+Job List or the triggers, so the node asks for newest first unless you choose otherwise.
+
+Output: raw IBM body, including the cursors for the next and previous pages.
+
+### Resource: `session`
+
+| operation | parameters | output |
+| :-- | :-- | :-- |
+| `create` (default) | `sessionMode` on typeVersion 2 (`mode` on typeVersion 1): `batch` default or `dedicated`; `sessionBackend` (string, required); `maxTtl` (seconds, default 28800; non-positive omits the field and lets IBM decide) | `{ sessionId, mode, backend, response }` |
+| `get` | `sessionId` (required) | raw IBM body |
+| `setAccepting` | `sessionId`, `acceptingJobs` (boolean, default true) | `{ sessionId, acceptingJobs }` |
+| `close` | `sessionId` | `{ sessionId, closed: true }` |
+
+Whatever the parameter is called in the UI, the value is always sent to IBM as `mode`.
+
+`batch` queues jobs to run consecutively and is the ONLY mode the Open (free) plan allows.
+`dedicated` reserves the QPU for low-latency back-to-back jobs (VQE and QAOA loops) and needs a paid
+plan. Pass the returned `sessionId` into each Submit's `submitSessionId`. Close the session when
+done so it stops holding the backend. IBM's max TTL default is 8 hours, subject to plan limits.
+
+## Trigger nodes
+
+Both are polling triggers: they run on the n8n scheduler (set the cadence with the built-in Poll
+Times field) and only while the workflow is ACTIVE. Manual "Fetch Test Event" returns one matching
+job without consuming state. On the very first poll they seed their cursor and emit nothing, so
+pre-existing job history never fires the workflow. Each poll scans only finished jobs
+(`pending=false`) without circuit payloads (`exclude_params=true`), remembers the last 500 seen job
+IDs, and emits only jobs not seen before.
+
+`ibmQuantumTrigger` parameters:
+- `statusFilter` (options: `any` default, `completed`, `failed`, `canceled`): which terminal status fires.
+- `limit` (number, default 50, max 200): jobs scanned per poll.
+- `tagFilter` (string, default ''): comma-separated tags; only jobs carrying ALL of them are
+  considered. Set tags on Submit to route each workflow's jobs to its own trigger.
+
+Output: the raw IBM job object per fired job (status at `state.status`).
+
+`ibmQuantumErrorTrigger` parameters: `errorFilter` (options: `any` default meaning failed or
+canceled, `failed`, `canceled`), plus the same `limit` and `tagFilter`.
+
+Output per job: `{ jobId, backend, status, reason, reasonCode, reasonSolution, job }`, carrying the
+failure reason IBM recorded (for example code 1517 for a non-ISA circuit), IBM's suggested solution,
+and the full job body under `job`.
+
+## Gate palette and OpenQASM 3 emission (Circuit Build)
+
+Emitted program header: `OPENQASM 3.0;` then `include "stdgates.inc";` then `qubit[n] q;` then
+`bit[m] c;` (the bit register only when `numClbits` is above 0).
+
+| gate value | qubit indices | params | emitted as | on IBM hardware |
+| :-- | :-- | :-- | :-- | :-- |
+| `id` | 1 | 0 | NOTHING (validated, then dropped) | would fail every job: stdgates defines `id` through the builtin `U`, which hardware rejects; the no-op is omitted instead |
+| `x` | 1 | 0 | `x q[i];` | runs as-is |
+| `y`, `z` | 1 | 0 | `y q[i];` etc. | transpile first |
+| `h` | 1 | 0 | `h q[i];` | transpile first |
+| `s`, `sdg`, `t`, `tdg` | 1 | 0 | `s q[i];` etc. | transpile first |
+| `rx`, `rz` | 1 | 1 | `rx(angle) q[i];` | runs as-is |
+| `ry`, `p` | 1 | 1 | `ry(angle) q[i];` | transpile first |
+| `u` | 1 | 3 | `U(theta, phi, lambda) q[i];` (uppercase builtin; a lowercase `u` does not exist in stdgates and is rejected) | transpile first |
+| `cz` | 2 (control,target) | 0 | `cz q[c], q[t];` | runs as-is |
+| `cx` | 2 (control,target) | 0 | `cx q[c], q[t];` | transpile first |
+| `swap` | 2 | 0 | `swap q[a], q[b];` | transpile first |
+| `crx`, `cry`, `crz` | 2 (control,target) | 1 | `crx(angle) q[c], q[t];` | transpile first |
+| `ccx` | 3 (control,control,target) | 0 | `ccx q[c1], q[c2], q[t];` | transpile first |
+| `measure` | 1 | 0 (plus `clbit`) | `c[clbit] = measure q[i];` | runs as-is |
+| `reset` | 1 | 0 | `reset q[i];` | runs as-is |
+| `barrier` | any (empty means all) | 0 | `barrier q[i], q[j];` or `barrier q;` | directive, always fine |
+
+Angles are radians. `sx` and `rzz` are deliberately NOT in the palette even though Heron backends
+list them as basis gates: IBM's OpenQASM 3 parser rejects `rzz` outright, and `sx` has no OpenQASM 3
+spelling that avoids the builtin `U`. Use `rx` instead of `sx`.
+
+## Hardware reality: ISA circuits and transpilation
+
+The single most common failure. The Qiskit Runtime REST API does NOT transpile. Real hardware
+executes only its native gate set (Heron processors run `rz`, `sx`, `x`, `cz`, plus measure, reset
+and barrier; check any backend with Backend Get Configuration, field `basis_gates`) over a fixed
+qubit topology. Submitting a non-ISA circuit (anything with `h`, `cx`, `u`, `ry` and so on) fails:
+
+    reason_code 1517: The instruction h on qubits (0,) is not supported by the target system.
+    Transpile your circuits for the target before submitting a primitive query.
+
+That is hardware behaviour, not a node bug. A failed job still consumes quota. Three ways to get an
+ISA circuit:
+
+1. Build natively in the node. Gates safe on Heron QPUs (the fleet Open-plan users see, such as
+   ibm_fez, ibm_kingston, ibm_marrakesh and ibm_torino): `x`, `rx`, `rz`, `cz`, `reset`, `barrier`,
+   `measure`. Two identities cover most needs (up to global phase):
+   `H = rz(pi/2) rx(pi/2) rz(pi/2)` and `CNOT(c to t) = H(t) cz(c,t) H(t)`, with pi/2 =
+   1.5707963267948966. A Bell state is 13 gate entries (see the example workflow below), verified on
+   real hardware. Caveat: a parametrised `rx` is a fractional gate, available on Heron only. On
+   Nighthawk processors (ibm_miami, ibm_berlin; Premium and Flex early access) the basis is
+   `cz, id, rz, sx, x` with no fractional `rx`, so this recipe does not run there and you must
+   transpile for Nighthawk instead. Fractional gates are also incompatible with gate twirling and
+   with ZNE and PEC error mitigation, so avoid Estimator resilience level 2 on circuits containing
+   a parametrised `rx`.
+2. Transpile locally with Qiskit (free, any plan, no live credentials needed):
+   `generate_preset_pass_manager(optimization_level=1, backend=FakeFez()).run(qc)` then
+   `qiskit.qasm3.dumps(isa)`, and paste or pipe the string into the node. Pin the SAME backend on
+   Submit that you transpiled for, because an ISA circuit is topology-specific. If the circuit uses
+   anything OpenQASM 3 cannot express, dump it as QPY instead and submit with `circuitFormat: qpy`.
+3. IBM's cloud Qiskit Transpiler Service, on Premium, Flex and On-Prem plans only. It lives at a
+   separate host and is not wired into this node.
+
+Simulators (where an instance still has any, since IBM has largely retired cloud simulators) accept
+any gate without transpilation; `includeSimulators` on Get Least Busy finds them.
+
+## Results format and bit order (Job Get Results)
+
+While the job is not finished, the node polls GET /jobs/{id} every `pollInterval` seconds until a
+terminal status or `maxWait`. Outcomes:
+
+- Timed out: `{ jobId, status, timedOut: true, job }`. The job may still be running; the jobId stays
+  valid, so re-check later or use the trigger.
+- Terminal but not completed (failed or cancelled): `{ jobId, status, job }`, with failure details
+  at `job.state.reason`, `reason_code` and `reason_solution`.
+- Completed: `{ jobId, status: "completed", pubCount, pubs, raw }`.
+
+Each entry in `pubs`:
+- Sampler: `{ type: "sampler", register, numBits, shots, counts, metadata, unparsedSamples? }`.
+  `counts` maps bitstrings to occurrence counts, e.g. `{ "00": 512, "11": 498 }`. Bit order follows
+  the classical register: **c[0] is the RIGHTMOST bit** (the standard Qiskit convention). Samples
+  arrive as hex and are decoded with BigInt, so registers wider than 53 bits stay exact.
+  `unparsedSamples` appears only when some samples could not be parsed, which is what explains a
+  counts total below shots.
+- Estimator: `{ type: "estimator", evs, stds, ensembleStandardError, metadata }`, the expectation
+  value or values matching the observables submitted.
+
+`raw` is the untouched IBM response if deeper fields are needed. `registerName` forces reading a
+specific classical register when a circuit defines several.
+
+## Error handling
+
+- IBM error bodies (`{ errors: [{ code, message, solution }] }`) are unwrapped: the real message
+  becomes the n8n error message and IBM's `solution` becomes the description, instead of a generic
+  "Bad request".
+- With "Continue on Fail" enabled, failed items yield `{ error: "<message>" }` and the run continues.
+- Local validation fails BEFORE any request, and before any quota is spent, for: malformed gate
+  input, a circuit that is not OpenQASM 3 (or not QPY when that format is selected), invalid Pauli
+  observables, non-object Additional Options, invalid register sizes, and a malformed API version.
+- Every HTTP request has a 30-second timeout. Numeric fields bypassed by expressions are coerced to
+  safe values: shots and limits fall back to defaults, Job List caps at 200, Workload List at 50,
+  and the job cost at 10800.
+
+Common failures:
+
+| symptom | cause and fix |
+| :-- | :-- |
+| 401 or IAM token errors | API key wrong, revoked or expired; regenerate it at cloud.ibm.com/iam/apikeys |
+| 404 or empty backends list | credential `region` does not match the instance CRN's region |
+| job fails, reason_code 1517 | circuit not ISA for that backend; transpile or build natively |
+| "gate twirling does not support fractional gates" | `twirlingGates` on with a parametrised rx or rzz; turn it off |
+| Estimator submit rejected | observables length does not match the qubit count, or invalid Pauli letters |
+| Get Results returns timedOut | hardware queue exceeded `maxWait`; raise it, or use the trigger pattern |
+| "is not a YYYY-MM-DD date" | the credential's API Version field is malformed; set it to 2026-04-15 |
+
+## Recommended workflow patterns
+
+1. Quick run (simulators or short queues): Circuit Build, then Backend Get Least Busy, then Job
+   Submit to Sampler, then Job Get Results. Get Results blocks the execution while polling, which is
+   fine for minutes and fragile for hours.
+2. Production run (real hardware, long queues), splitting submission from results:
+   - Workflow A: build and submit with `jobTags` set (for example `my-experiment`), finishing at once.
+   - Workflow B (ACTIVE): IBM Quantum Trigger with the same tag in `tagFilter` and statusFilter
+     `completed`, then Job Get Results (which returns instantly, the job being already done).
+   - Workflow C (ACTIVE): IBM Quantum Error Trigger with the same tag, for alerting or a fallback,
+     using `reason`, `reasonCode` and `reasonSolution`.
+3. Iterative loops (VQE, QAOA): Session Create (mode `batch` on the free plan), then repeated
+   Submits with `submitSessionId` and `parameters` bindings, then Session Close. Check Account Get
+   Usage first, and consider `maxCost` on each submit.
+4. Quota reporting: Schedule Trigger, then Account Get Usage Analytics Grouped by backend or plan,
+   for a periodic spend report. These read-only calls consume no QPU time.
+5. AI agent: attach the ACTION node to an n8n AI Agent as a tool for the read paths (least busy
+   backend, job status, usage). Pair submission with a pre-built ISA circuit.
+
+## Example workflow JSON
+
+A complete, runnable n8n workflow: a hardware-safe Bell state (native gates only, no transpiler), a
+least-busy backend, submit, then a blocking wait for counts. Replace the credential id and name with
+the user's own. On import, n8n rewires everything from this JSON.
+
+```json
+{
+  "name": "IBM Quantum Bell state",
+  "nodes": [
+    { "id": "m1", "name": "Run", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+    { "id": "c1", "name": "Build Bell (ISA)", "type": "n8n-nodes-ibm-quantum.ibmQuantum", "typeVersion": 2, "position": [200, 0],
+      "credentials": { "ibmQuantumApi": { "id": "REPLACE_ME", "name": "IBM Quantum account" } },
+      "parameters": { "resource": "circuit", "operation": "build", "numQubits": 2, "numClbits": 2,
+        "gates": { "gate": [
+          { "gate": "rz", "qubits": "0", "params": "1.5707963267948966" },
+          { "gate": "rx", "qubits": "0", "params": "1.5707963267948966" },
+          { "gate": "rz", "qubits": "0", "params": "1.5707963267948966" },
+          { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "rx", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "cz", "qubits": "0,1" },
+          { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "rx", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "barrier", "qubits": "0,1" },
+          { "gate": "measure", "qubits": "0", "clbit": 0 },
+          { "gate": "measure", "qubits": "1", "clbit": 1 }
+        ] } } },
+    { "id": "b1", "name": "Least Busy QPU", "type": "n8n-nodes-ibm-quantum.ibmQuantum", "typeVersion": 2, "position": [400, 0],
+      "credentials": { "ibmQuantumApi": { "id": "REPLACE_ME", "name": "IBM Quantum account" } },
+      "parameters": { "resource": "backend", "operation": "getLeastBusy", "minQubits": 2, "includeSimulators": false } },
+    { "id": "j1", "name": "Submit", "type": "n8n-nodes-ibm-quantum.ibmQuantum", "typeVersion": 2, "position": [600, 0],
+      "credentials": { "ibmQuantumApi": { "id": "REPLACE_ME", "name": "IBM Quantum account" } },
+      "parameters": { "resource": "job", "operation": "submitSampler",
+        "backend": "={{ $json.leastBusy }}",
+        "circuitFormat": "qasm3",
+        "qasm3": "={{ $('Build Bell (ISA)').item.json.qasm3 }}",
+        "shots": 1024, "maxCost": 60, "jobTags": "bell-demo" } },
+    { "id": "j2", "name": "Get Results", "type": "n8n-nodes-ibm-quantum.ibmQuantum", "typeVersion": 2, "position": [800, 0],
+      "credentials": { "ibmQuantumApi": { "id": "REPLACE_ME", "name": "IBM Quantum account" } },
+      "parameters": { "resource": "job", "operation": "getResults",
+        "jobId": "={{ $json.jobId }}", "pollInterval": 5, "maxWait": 600 } }
+  ],
+  "connections": {
+    "Run": { "main": [[{ "node": "Build Bell (ISA)", "type": "main", "index": 0 }]] },
+    "Build Bell (ISA)": { "main": [[{ "node": "Least Busy QPU", "type": "main", "index": 0 }]] },
+    "Least Busy QPU": { "main": [[{ "node": "Submit", "type": "main", "index": 0 }]] },
+    "Submit": { "main": [[{ "node": "Get Results", "type": "main", "index": 0 }]] }
+  }
+}
+```
+
+Expected counts: mostly `00` and `11` in near-equal parts, with a few percent of `01` and `10` from
+readout noise. The `cz` between qubits 0 and 1 assumes those qubits are coupled, which holds on
+current IBM devices; for full generality transpile for the exact backend instead of using Get Least
+Busy.
+
+## Using the node as an AI Agent tool
+
+The action node sets `usableAsTool`, so it can be attached to n8n's AI Agent node as a tool. The
+good tool calls are the READ paths: Backend Get Least Busy ("which QPU has the shortest queue?"),
+Account Get Usage ("how much runtime is left?"), Job Get Status, Job List, Workload List. Parameters
+can be delegated to the model with `$fromAI()` expressions, for example
+`={{ $fromAI('jobId', 'the IBM Quantum job id') }}`. Submission as a tool works, but the model must
+supply an ISA circuit, so pair it with a pre-built circuit rather than asking the model to write
+QASM for hardware. Attach the ACTION node only; the triggers are not tools.
+
+On self-hosted n8n, using an unverified community node as an agent tool also requires
+`N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true`. This package is verified, so on n8n Cloud and for
+verified installs no flag is needed.
+
+## Limits, quotas and plan notes
+
+- Open (free) plan: 10 minutes (600 seconds) of QPU time per 28-day rolling window; `batch` sessions
+  only, never `dedicated`; no cloud Transpiler Service; failed jobs still consume quota; instances
+  are us-east only. IBM's 2026 promotion adds 180 minutes over 12 months once 20 minutes have been
+  used within a year.
+- Plans are Open, Pay-As-You-Go, Flex, Premium and On-Prem.
+- IBM rate-limits job submission to 5 jobs per minute per user. Job input payloads are capped at
+  50 MB, a single job may run at most 3 hours (10800 seconds), and Sampler jobs are capped at 10
+  million total executions.
+- GET /jobs is capped at 200 results per call and GET /workloads at 50; the node clamps both.
+- Tags: at most 8 per job or filter.
+- One PUB per submitted job (the node's design). To run many parameter sets, use `parameters`
+  bindings with arrays, or several Submits inside a session.
+- Every request times out after 30 seconds, so a hung connection cannot stall an execution.
+- Get Results poll values are clamped to at least 1 second; defaults are a 5 second interval and a
+  300 second maximum wait.
+- IBM exposes no push or webhook for job completion (verified against the API), so polling is the
+  only mechanism, which is why the triggers exist.
+- Job data is retained for 3 years.
+
+## What this package does NOT do
+
+- No transpilation. The REST API has none; transpile locally or build natively.
+- No local simulator; execution happens on IBM's infrastructure.
+- No Executor, NoiseLearnerV3 or Calibrator programs. All three live on the same `POST /v1/jobs`
+  endpoint the node already uses, but each requires circuits encoded as base64 QPY produced by
+  Qiskit, which defeats the point of a package with no Qiskit dependency. The version 2 Noise
+  Learner is supported precisely because it accepts a plain QASM string.
+- No `GET /v1/accounts/{id}`. The endpoint exists, but nothing else in this API returns an account
+  id, so there is no way to reach it from inside a workflow.
+- No Qiskit Functions catalog, Qiskit Serverless, or cloud Transpiler Service endpoints.
+- No support for the retired legacy IBM Quantum platform or its token auth.
+- No streaming or webhooks; job completion is detected by polling.
+
+## Underlying REST API details (for debugging)
+
+Base URL: `https://quantum.cloud.ibm.com/api/v1` (us-east) or
+`https://eu-de.quantum.cloud.ibm.com/api/v1` (eu-de). Headers on every call: `Authorization:
+Bearer <IAM token>`, `Service-CRN: <instance CRN>`, `IBM-API-Version: <date>`. Endpoints used:
+`GET /backends`, `GET /backends/{name}/configuration|properties|status|defaults`, `POST /jobs`,
+`GET /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/results|logs|metrics`, `PUT /jobs/{id}/tags`,
+`POST /jobs/{id}/cancel`, `DELETE /jobs/{id}`, `GET /workloads`, `GET /tags`, `GET /versions`, `POST /sessions`,
+`GET /sessions/{id}`, `PATCH /sessions/{id}`, `DELETE /sessions/{id}/close`, `GET /instance`,
+`GET /instances/usage`, `GET /instances/configuration`, `PUT /instances/configuration`,
+`GET /analytics/usage`, `GET /analytics/usage_grouped`, `GET /analytics/usage_grouped_by_date`,
+`GET /analytics/filters`. Array query parameters are sent as repeated keys (`tags=a&tags=b`);
+bracket encodings are silently ignored by IBM. Official API reference:
+https://quantum.cloud.ibm.com/docs/en/api/qiskit-runtime-rest
+
+## Links
+
+- README (human docs): https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme
+- Changelog: https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/blob/main/CHANGELOG.md
+- Contributor guide for AI agents: https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/blob/main/AGENTS.md
+- npm: https://www.npmjs.com/package/n8n-nodes-ibm-quantum
+- Issues: https://github.com/TuguiDragos/n8n-nodes-ibm-quantum/issues
+- IBM Quantum Platform docs: https://quantum.cloud.ibm.com/docs
+- n8n community nodes: https://docs.n8n.io/integrations/community-nodes/installation/

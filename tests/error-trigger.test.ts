@@ -74,7 +74,7 @@ function makeErrorContext(jobs: ErrorJob[], errorFilter = 'any', mode: 'trigger'
 	const defaults: Record<string, unknown> = { errorFilter, tagFilter: '', limit: 20 };
 	return {
 		getNodeParameter: (name: string) => defaults[name],
-		getCredentials: async () => ({ region: 'us-east' }),
+		getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 		getMode: () => mode,
 		getNode: () => ({ name: 'IBM Quantum Error Trigger' }),
 		getWorkflowStaticData: () => ({}),
@@ -125,7 +125,7 @@ describe('IbmQuantumErrorTrigger.poll wiring (TEST-08)', () => {
 		const defaults: Record<string, unknown> = { errorFilter: 'any', tagFilter: '', limit: 20 };
 		const ctx = {
 			getNodeParameter: (name: string) => defaults[name],
-			getCredentials: async () => ({ region: 'us-east' }),
+			getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 			getMode: () => 'trigger',
 			getNode: () => ({ name: 'IBM Quantum Error Trigger' }),
 			getWorkflowStaticData: () => staticData,

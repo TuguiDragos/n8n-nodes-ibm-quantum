@@ -27,7 +27,11 @@ const GATE_OPTIONS = [
 	{ name: 'Z', value: 'z' },
 ];
 
+// Sampler and Estimator share the PUB shape and the V2 error-suppression toggles.
 const SUBMIT_OPS = ['submitSampler', 'submitEstimator'];
+// The noise learner joins them only for the job envelope: backend, circuit and the job-level
+// fields. Its own options object is additionalProperties:false, so the toggles above stay out.
+const ALL_SUBMIT_OPS = [...SUBMIT_OPS, 'submitNoiseLearner'];
 
 export const nodeProperties: INodeProperties[] = [
 	{
@@ -41,6 +45,7 @@ export const nodeProperties: INodeProperties[] = [
 			{ name: 'Circuit', value: 'circuit' },
 			{ name: 'Job', value: 'job' },
 			{ name: 'Session', value: 'session' },
+			{ name: 'Workload', value: 'workload' },
 		],
 		default: 'job',
 	},
@@ -53,12 +58,34 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['account'] } },
 		options: [
 			{
+				name: 'Get API Versions',
+				value: 'getApiVersions',
+				action: 'Get the API versions IBM currently serves',
+			},
+			{
 				name: 'Get Configuration',
 				value: 'getConfiguration',
 				action: 'Get the instance configuration',
 			},
 			{ name: 'Get Instance', value: 'getInstance', action: 'Get the current instance details' },
 			{ name: 'Get Usage', value: 'getUsage', action: 'Get instance usage and allocation' },
+			{ name: 'Get Usage Analytics', value: 'getAnalytics', action: 'Get usage analytics' },
+			{
+				name: 'Get Usage Analytics Filters',
+				value: 'getAnalyticsFilters',
+				action: 'Get the filter values available for usage analytics',
+			},
+			{
+				name: 'Get Usage Analytics Grouped',
+				value: 'getAnalyticsGrouped',
+				action: 'Get usage analytics grouped by a key',
+			},
+			{
+				name: 'Get Usage Analytics Grouped by Date',
+				value: 'getAnalyticsByDate',
+				action: 'Get usage analytics grouped by date',
+			},
+			{ name: 'Set Cost Limit', value: 'setCostLimit', action: 'Set the instance cost limit' },
 		],
 		default: 'getUsage',
 	},
@@ -71,6 +98,7 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['backend'] } },
 		options: [
 			{ name: 'Get Configuration', value: 'getConfiguration', action: 'Get backend configuration' },
+			{ name: 'Get Defaults', value: 'getDefaults', action: 'Get backend default settings' },
 			{ name: 'Get Least Busy', value: 'getLeastBusy', action: 'Get the least busy backend' },
 			{ name: 'Get Properties', value: 'getProperties', action: 'Get backend properties' },
 			{ name: 'Get Status', value: 'getStatus', action: 'Get backend status' },
@@ -114,10 +142,16 @@ export const nodeProperties: INodeProperties[] = [
 			},
 			{ name: 'Get Status', value: 'getStatus', action: 'Get the status of a job' },
 			{ name: 'List', value: 'list', action: 'List recent jobs' },
+			{ name: 'List Tags', value: 'listTags', action: 'List the tags used on jobs' },
 			{
 				name: 'Submit to Estimator',
 				value: 'submitEstimator',
 				action: 'Submit a circuit to the estimator primitive',
+			},
+			{
+				name: 'Submit to Noise Learner',
+				value: 'submitNoiseLearner',
+				action: 'Submit a circuit to the noise learner program',
 			},
 			{
 				name: 'Submit to Sampler',
@@ -149,6 +183,227 @@ export const nodeProperties: INodeProperties[] = [
 	},
 
 	{
+		displayName: 'Group By',
+		name: 'groupBy',
+		type: 'options',
+		options: [
+			{ name: 'Backend', value: 'backend' },
+			{ name: 'Instance', value: 'instance' },
+			{ name: 'Plan', value: 'plan' },
+			{ name: 'Subscription ID', value: 'subscription_id' },
+			{ name: 'User', value: 'user_id' },
+		],
+		default: 'backend',
+		description: 'Key the usage totals are grouped by',
+		displayOptions: { show: { resource: ['account'], operation: ['getAnalyticsGrouped'] } },
+	},
+	{
+		displayName: 'Filters',
+		name: 'analyticsFilters',
+		type: 'collection',
+		placeholder: 'Add Filter',
+		default: {},
+		displayOptions: {
+			show: {
+				resource: ['account'],
+				operation: ['getAnalytics', 'getAnalyticsByDate', 'getAnalyticsGrouped'],
+			},
+		},
+		options: [
+			{
+				displayName: 'Backend',
+				name: 'backend',
+				type: 'string',
+				default: '',
+				placeholder: 'ibm_kingston, ibm_fez',
+				description: 'Only usage on these backends, comma-separated for several',
+			},
+			{
+				displayName: 'Instance',
+				name: 'instance',
+				type: 'string',
+				default: '',
+				description:
+					'Only usage on these instances, comma-separated for several. Defaults to the instances the credential can see.',
+			},
+			{
+				displayName: 'Interval End',
+				name: 'intervalEnd',
+				type: 'dateTime',
+				default: '',
+				description: 'End of the reporting window',
+			},
+			{
+				displayName: 'Interval Start',
+				name: 'intervalStart',
+				type: 'dateTime',
+				default: '',
+				description: 'Start of the reporting window',
+			},
+			{
+				displayName: 'Plan',
+				name: 'plan',
+				type: 'string',
+				default: '',
+				placeholder: 'open, standard',
+				description: 'Only usage on these plans, comma-separated for several',
+			},
+			{
+				displayName: 'Simulators',
+				name: 'simulators',
+				type: 'boolean',
+				default: true,
+				description: 'Whether to count simulator usage as well as real hardware',
+			},
+			{
+				displayName: 'Subscription ID',
+				name: 'subscriptionId',
+				type: 'string',
+				default: '',
+				description: 'Only usage under these subscriptions, comma-separated for several',
+			},
+			{
+				displayName: 'User ID',
+				name: 'userId',
+				type: 'string',
+				default: '',
+				description: 'Only usage by these users, comma-separated for several',
+			},
+		],
+	},
+	{
+		displayName: 'Cost Limit (Seconds)',
+		name: 'instanceLimit',
+		type: 'number',
+		typeOptions: { minValue: 0 },
+		default: 0,
+		description:
+			'Total runtime seconds the instance may spend before IBM cancels running jobs with "Ran too long". Zero removes the limit entirely.',
+		displayOptions: { show: { resource: ['account'], operation: ['setCostLimit'] } },
+	},
+
+	{
+		displayName: 'Operation',
+		name: 'operation',
+		type: 'options',
+		noDataExpression: true,
+		displayOptions: { show: { resource: ['workload'] } },
+		options: [{ name: 'List', value: 'list', action: 'List jobs and sessions together' }],
+		default: 'list',
+	},
+
+	{
+		displayName: 'Limit',
+		name: 'limit',
+		type: 'number',
+		// IBM caps this listing at 50, unlike the jobs listing which allows 200.
+		typeOptions: { minValue: 1, maxValue: 50 },
+		default: 50,
+		description: 'Max number of results to return',
+		displayOptions: { show: { resource: ['workload'], operation: ['list'] } },
+	},
+	{
+		displayName: 'Filters',
+		name: 'workloadFilters',
+		type: 'collection',
+		placeholder: 'Add Filter',
+		default: {},
+		displayOptions: { show: { resource: ['workload'], operation: ['list'] } },
+		options: [
+			{
+				displayName: 'Backend',
+				name: 'backend',
+				type: 'string',
+				default: '',
+				description: 'Only workloads that ran on this backend',
+			},
+			{
+				displayName: 'Created After',
+				name: 'createdAfter',
+				type: 'dateTime',
+				default: '',
+				description: 'Only workloads created after this time',
+			},
+			{
+				displayName: 'Created Before',
+				name: 'createdBefore',
+				type: 'dateTime',
+				default: '',
+				description: 'Only workloads created before this time',
+			},
+			{
+				displayName: 'Mode',
+				name: 'workloadMode',
+				type: 'options',
+				options: [
+					{ name: 'Any', value: '' },
+					{ name: 'Batch', value: 'batch' },
+					{ name: 'Job', value: 'job' },
+					{ name: 'Session', value: 'session' },
+				],
+				default: '',
+				description: 'Keep only standalone jobs, sessions or batches',
+			},
+			{
+				displayName: 'Next Cursor',
+				name: 'next',
+				type: 'string',
+				default: '',
+				description:
+					'Cursor from a previous response, to fetch the following page. This listing pages by cursor rather than by offset.',
+			},
+			{
+				displayName: 'Previous Cursor',
+				name: 'previous',
+				type: 'string',
+				default: '',
+				description: 'Cursor from a previous response, to fetch the preceding page',
+			},
+			{
+				displayName: 'Search',
+				name: 'search',
+				type: 'string',
+				default: '',
+				description: 'Free-text match against workload IDs and tags',
+			},
+			{
+				displayName: 'Sort',
+				name: 'sort',
+				type: 'options',
+				options: [
+					{ name: 'Newest First', value: '-createdAt' },
+					{ name: 'Oldest First', value: 'createdAt' },
+				],
+				default: '-createdAt',
+				description:
+					'Order of the returned workloads. The node asks for newest first, matching Job List; the API on its own would return oldest first.',
+			},
+			{
+				displayName: 'Status',
+				name: 'status',
+				type: 'multiOptions',
+				options: [
+					{ name: 'Canceled', value: 'canceled' },
+					{ name: 'Completed', value: 'completed' },
+					{ name: 'Failed', value: 'failed' },
+					{ name: 'In Progress', value: 'in_progress' },
+					{ name: 'Pending', value: 'pending' },
+				],
+				default: [],
+				description: 'Keep only workloads in these states',
+			},
+			{
+				displayName: 'Tags',
+				name: 'tags',
+				type: 'string',
+				default: '',
+				placeholder: 'experiment-7, vqe',
+				description: 'Only workloads carrying these tags, comma-separated for several',
+			},
+		],
+	},
+
+	{
 		displayName: 'Backend Name',
 		name: 'backendName',
 		type: 'string',
@@ -160,7 +415,7 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: {
 			show: {
 				resource: ['backend'],
-				operation: ['getConfiguration', 'getProperties', 'getStatus'],
+				operation: ['getConfiguration', 'getDefaults', 'getProperties', 'getStatus'],
 			},
 		},
 	},
@@ -279,7 +534,20 @@ export const nodeProperties: INodeProperties[] = [
 		placeholder: 'ibm_kingston',
 		description:
 			'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits.',
-		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
+	},
+	{
+		displayName: 'Circuit Format',
+		name: 'circuitFormat',
+		type: 'options',
+		options: [
+			{ name: 'OpenQASM 3', value: 'qasm3' },
+			{ name: 'QPY (Base64)', value: 'qpy' },
+		],
+		default: 'qasm3',
+		description:
+			"Format the circuit is written in. OpenQASM 3 is the text form this node builds and most people paste. QPY is Qiskit's binary format, base64 encoded, which preserves circuits OpenQASM 3 cannot express.",
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 	{
 		displayName: 'OpenQASM 3 Circuit',
@@ -290,7 +558,23 @@ export const nodeProperties: INodeProperties[] = [
 		default: '',
 		description:
 			'Circuit to submit, as an ISA (backend-native) OpenQASM 3 string. Use an expression to reference a Circuit node output.',
-		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
+		displayOptions: {
+			show: { resource: ['job'], operation: ALL_SUBMIT_OPS, circuitFormat: ['qasm3'] },
+		},
+	},
+	{
+		displayName: 'QPY Circuit',
+		name: 'qpyCircuit',
+		type: 'string',
+		typeOptions: { rows: 4 },
+		required: true,
+		default: '',
+		placeholder: 'UUlTS0lU...',
+		description:
+			'Circuit to submit, as base64-encoded QPY. Produce it by writing qiskit.qpy.dump(circuit, buffer) to a BytesIO and base64 encoding the bytes. It must already be transpiled (ISA) for the chosen backend.',
+		displayOptions: {
+			show: { resource: ['job'], operation: ALL_SUBMIT_OPS, circuitFormat: ['qpy'] },
+		},
 	},
 	{
 		displayName: 'Parameters',
@@ -375,7 +659,17 @@ export const nodeProperties: INodeProperties[] = [
 		default: '',
 		description:
 			'Optional session or batch ID (from Session Create) to run this job inside, for low-latency consecutive execution',
-		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
+	},
+	{
+		displayName: 'Max Cost (Seconds)',
+		name: 'maxCost',
+		type: 'number',
+		typeOptions: { minValue: 0, maxValue: 10800 },
+		default: 0,
+		description:
+			'Maximum runtime seconds this job may consume before IBM cancels it. Zero lets the program decide. IBM allows at most 10800 (three hours) and caps anything higher. On the Open plan, where the whole allowance is 600 seconds per 28 days, this stops one runaway job from spending it.',
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 	{
 		displayName: 'Tags',
@@ -385,7 +679,7 @@ export const nodeProperties: INodeProperties[] = [
 		placeholder: 'experiment-7, vqe',
 		description:
 			'Comma-separated tags stored on the job. Jobs can then be filtered by tag in the List operation and the triggers. On Update Tags an empty value clears all tags.',
-		displayOptions: { show: { resource: ['job'], operation: [...SUBMIT_OPS, 'updateTags'] } },
+		displayOptions: { show: { resource: ['job'], operation: [...ALL_SUBMIT_OPS, 'updateTags'] } },
 	},
 	{
 		displayName: 'Private',
@@ -394,7 +688,7 @@ export const nodeProperties: INodeProperties[] = [
 		default: false,
 		description:
 			'Whether to mark the job private, hiding its input and results from other collaborators on the instance. Requires a plan that supports private jobs.',
-		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 	{
 		displayName: 'Additional Options',
@@ -403,7 +697,94 @@ export const nodeProperties: INodeProperties[] = [
 		default: '{}',
 		description:
 			'Advanced JSON options passed straight to the primitive, for example {"default_shots": 4096}. Most workflows can leave this as {}. See the IBM Qiskit Runtime primitive options documentation.',
-		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
+	},
+
+	{
+		displayName: 'Search',
+		name: 'tagSearch',
+		type: 'string',
+		default: '',
+		placeholder: 'experiment',
+		description:
+			'Substring the returned tags must contain. Leave empty to list every tag on your jobs.',
+		displayOptions: { show: { resource: ['job'], operation: ['listTags'] } },
+	},
+	{
+		displayName: 'Noise Learner Options',
+		name: 'noiseLearnerOptions',
+		type: 'collection',
+		placeholder: 'Add Option',
+		default: {},
+		displayOptions: { show: { resource: ['job'], operation: ['submitNoiseLearner'] } },
+		options: [
+			{
+				displayName: 'Layer Pair Depths',
+				name: 'layerPairDepths',
+				type: 'string',
+				default: '',
+				placeholder: '0, 1, 2, 4, 16, 32',
+				description:
+					'Circuit depths, measured in number of gate pairs, to use in the learning experiments. Comma-separated.',
+			},
+			{
+				displayName: 'Max Layers to Learn',
+				name: 'maxLayersToLearn',
+				type: 'number',
+				typeOptions: { minValue: 0 },
+				default: 0,
+				description:
+					'Maximum number of unique entangling layers to characterise. Zero leaves the choice to IBM.',
+			},
+			{
+				displayName: 'Number of Randomizations',
+				name: 'numRandomizations',
+				type: 'number',
+				typeOptions: { minValue: 0 },
+				default: 0,
+				description:
+					'Number of random circuits per learning circuit configuration. Zero leaves the choice to IBM.',
+			},
+			{
+				displayName: 'Shots per Randomization',
+				name: 'shotsPerRandomization',
+				type: 'number',
+				typeOptions: { minValue: 0 },
+				default: 0,
+				description:
+					'Shots to use per random learning circuit. Zero leaves the choice to IBM. Raising this and the randomizations count is what makes a learning job expensive.',
+			},
+			{
+				displayName: 'Twirling Strategy',
+				name: 'twirlingStrategy',
+				type: 'options',
+				options: [
+					{ name: 'Active', value: 'active' },
+					{ name: 'Active Accum', value: 'active-accum' },
+					{ name: 'Active Circuit', value: 'active-circuit' },
+					{ name: 'All', value: 'all' },
+				],
+				default: 'active-accum',
+				description: 'How qubits are twirled in the identified layers of two-qubit gates',
+			},
+		],
+	},
+	{
+		displayName: 'Log Level',
+		name: 'logLevel',
+		type: 'options',
+		options: [
+			{ name: 'Critical', value: 'critical' },
+			{ name: 'Debug', value: 'debug' },
+			{ name: 'Default', value: '' },
+			{ name: 'Error', value: 'error' },
+			{ name: 'Info', value: 'info' },
+			{ name: 'Warning', value: 'warning' },
+		],
+		default: '',
+		description:
+			'Verbosity IBM records for this job, readable afterwards with Get Logs. Leave on Default unless you are debugging a failure.',
+		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 
 	{
@@ -578,7 +959,21 @@ export const nodeProperties: INodeProperties[] = [
 		default: 'batch',
 		description:
 			'Batch queues jobs to run consecutively without interactive priority, and is the only mode the Open (free) plan allows. Dedicated reserves the QPU for back-to-back jobs (best for VQE and QAOA loops) and requires a paid plan.',
-		displayOptions: { show: { resource: ['session'], operation: ['create'] } },
+		// Kept for workflows saved on version 1, where this is the name their value sits under.
+		displayOptions: { show: { resource: ['session'], operation: ['create'], '@version': [1] } },
+	},
+	{
+		displayName: 'Mode',
+		name: 'sessionMode',
+		type: 'options',
+		options: [
+			{ name: 'Batch', value: 'batch' },
+			{ name: 'Dedicated', value: 'dedicated' },
+		],
+		default: 'batch',
+		description:
+			'Batch queues jobs to run consecutively without interactive priority, and is the only mode the Open (free) plan allows. Dedicated reserves the QPU for back-to-back jobs (best for VQE and QAOA loops) and requires a paid plan.',
+		displayOptions: { show: { resource: ['session'], operation: ['create'], '@version': [2] } },
 	},
 	{
 		displayName: 'Backend',

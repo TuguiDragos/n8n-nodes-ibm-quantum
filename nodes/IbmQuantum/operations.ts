@@ -1,18 +1,19 @@
 import {
-	NodeApiError,
 	NodeOperationError,
 	sleep,
 	type IDataObject,
 	type IExecuteFunctions,
 	type INode,
-	type JsonObject,
 } from 'n8n-workflow';
 
-import { ibmQuantumApiRequest, type RequestContext } from './transport';
+import { asNodeError, errorMessage, ibmQuantumApiRequest, type RequestContext } from './transport';
 import { buildQasm3, parseNumberListStrict, validateGateInput, type GateOperation } from './qasm3';
 import { parseResults } from './results';
 
 const CONTROLLED_TWO = new Set(['cx', 'cz', 'crx', 'cry', 'crz']);
+
+// IBM refuses a job cost above three hours and silently caps anything larger.
+export const MAX_JOB_COST_SECONDS = 10800;
 
 // Build a GateOperation from parsed, validated input.
 function mapGate(gate: string, qubits: number[], params: number[], clbit?: number): GateOperation {
@@ -80,9 +81,7 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 			qubits = parseNumberListStrict((raw.qubits as string) ?? '', 'Qubits');
 			params = parseNumberListStrict((raw.params as string) ?? '', 'Parameters');
 		} catch (error) {
-			// parseNumberListStrict only ever throws an Error, so the String() arm is unreachable.
-			// It stays because narrowing an unknown catch binding without it is not type-safe.
-			const message = error instanceof Error ? error.message : String(error);
+			const message = errorMessage(error);
 			throw new NodeOperationError(node, `Gate #${idx + 1} (${gate}): ${message}`, {
 				itemIndex,
 			});
@@ -111,6 +110,35 @@ function requireQasm3Header(qasm3: string, label: string, node: INode, itemIndex
 			{ itemIndex },
 		);
 	}
+}
+
+// Every QPY payload opens with the ASCII magic QISKIT. Six bytes fill two whole base64 groups, so
+// an encoded file starts with exactly these eight characters and a prefix test is exact.
+export const QPY_BASE64_MAGIC = 'UUlTS0lU';
+
+function requireQpyPayload(circuit: string, node: INode, itemIndex: number): void {
+	if (!circuit.trimStart().startsWith(QPY_BASE64_MAGIC)) {
+		throw new NodeOperationError(
+			node,
+			'QPY Circuit is not a base64-encoded QPY payload (the encoding of a QPY file starts with "UUlTS0lU"). Produce it with qiskit.qpy.dump into a BytesIO and base64-encode the bytes.',
+			{ itemIndex },
+		);
+	}
+}
+
+// Submit validates the circuit locally whatever its format, because IBM queues a malformed job,
+// charges QPU time for it and only then fails it on a parse error.
+function requireSupportedCircuit(
+	circuit: string,
+	format: string,
+	node: INode,
+	itemIndex: number,
+): void {
+	if (format === 'qpy') {
+		requireQpyPayload(circuit, node, itemIndex);
+		return;
+	}
+	requireQasm3Header(circuit, 'OpenQASM 3 Circuit', node, itemIndex);
 }
 
 export function handleCircuitImport(this: IExecuteFunctions, itemIndex: number): IDataObject {
@@ -185,6 +213,7 @@ export async function handleBackend(
 	const backendName = this.getNodeParameter('backendName', itemIndex) as string;
 	const endpoints: Record<string, string> = {
 		getConfiguration: `/backends/${backendName}/configuration`,
+		getDefaults: `/backends/${backendName}/defaults`,
 		getProperties: `/backends/${backendName}/properties`,
 		getStatus: `/backends/${backendName}/status`,
 	};
@@ -260,22 +289,23 @@ export function mergePrimitiveOptions(
 // (circuit, observables, parameters?, precision?), extended past the required two items only when needed.
 export function buildPubData(
 	primitive: 'sampler' | 'estimator',
-	qasm3: string,
+	circuit: string,
 	observables: unknown,
 	parameters: unknown,
 	shots: number,
 	precision: number,
 ): unknown[] {
 	if (primitive === 'estimator') {
-		const pub: unknown[] = [qasm3, observables];
+		const pub: unknown[] = [circuit, observables];
 		if (parameters !== null || precision > 0) pub.push(parameters);
 		if (precision > 0) pub.push(precision);
 		return pub;
 	}
-	return [qasm3, parameters, shots];
+	return [circuit, parameters, shots];
 }
 
-function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDataObject {
+// The JSON escape hatch, shared by every program. Returns a fresh object so callers can extend it.
+function readAdditionalOptions(this: IExecuteFunctions, itemIndex: number): IDataObject {
 	const additionalOptionsRaw = this.getNodeParameter(
 		'additionalOptions',
 		itemIndex,
@@ -296,13 +326,52 @@ function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDat
 			{ itemIndex },
 		);
 	}
-	const base: IDataObject = parsed && typeof parsed === 'object' ? (parsed as IDataObject) : {};
+	return parsed && typeof parsed === 'object' ? { ...(parsed as IDataObject) } : {};
+}
+
+function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDataObject {
 	return mergePrimitiveOptions(
-		base,
+		readAdditionalOptions.call(this, itemIndex),
 		this.getNodeParameter('dynamicalDecoupling', itemIndex, false) as boolean,
 		this.getNodeParameter('twirlingGates', itemIndex, false) as boolean,
 		this.getNodeParameter('twirlingMeasure', itemIndex, false) as boolean,
 	);
+}
+
+// Every program shares the same job envelope: which backend, which circuit, and the job-level
+// fields that sit beside params rather than inside it.
+function readSubmitEnvelope(
+	this: IExecuteFunctions,
+	itemIndex: number,
+): { backend: string; circuit: string; sessionId: string; body: IDataObject } {
+	const backend = this.getNodeParameter('backend', itemIndex) as string;
+	// A workflow saved before the format selector existed stores no circuitFormat, so the default
+	// keeps it on the OpenQASM 3 field it already filled in.
+	const format = this.getNodeParameter('circuitFormat', itemIndex, 'qasm3') as string;
+	const circuitParam = format === 'qpy' ? 'qpyCircuit' : 'qasm3';
+	const circuit = (this.getNodeParameter(circuitParam, itemIndex) as string) ?? '';
+	const sessionId = this.getNodeParameter('submitSessionId', itemIndex, '') as string;
+
+	requireSupportedCircuit(circuit, format, this.getNode(), itemIndex);
+
+	const body: IDataObject = {};
+	// session_id is a sibling of program_id/backend/params, never inside params.
+	if (sessionId) body.session_id = sessionId;
+	const tags = parseCsvList(this.getNodeParameter('jobTags', itemIndex, '') as string);
+	if (tags.length > 0) body.tags = tags;
+	// The API expects the private flag only when set, matching the official client.
+	if (this.getNodeParameter('privateJob', itemIndex, false) === true) body.private = true;
+	// Zero means "omit and let the program decide", so the fallback is 0 rather than a default cap.
+	const maxCost = clampCount(
+		this.getNodeParameter('maxCost', itemIndex, 0),
+		0,
+		MAX_JOB_COST_SECONDS,
+	);
+	if (maxCost > 0) body.cost = maxCost;
+	const logLevel = this.getNodeParameter('logLevel', itemIndex, '') as string;
+	if (logLevel) body.log_level = logLevel;
+
+	return { backend, circuit, sessionId, body };
 }
 
 async function submitJob(
@@ -311,14 +380,7 @@ async function submitJob(
 	primitive: 'sampler' | 'estimator',
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const backend = this.getNodeParameter('backend', itemIndex) as string;
-	const qasm3 = (this.getNodeParameter('qasm3', itemIndex) as string) ?? '';
-	const sessionId = this.getNodeParameter('submitSessionId', itemIndex, '') as string;
-
-	// Reject a circuit that is plainly not OpenQASM 3 before it costs a submission. IBM accepts
-	// the job, queues it, charges QPU time and only then fails it with a parse error, so catching
-	// it here saves the user both the wait and the quota.
-	requireQasm3Header(qasm3, 'OpenQASM 3 Circuit', this.getNode(), itemIndex);
+	const { backend, circuit, sessionId, body } = readSubmitEnvelope.call(this, itemIndex);
 
 	// Parameters is a JSON field but an expression may resolve it to an object. Handle both, and
 	// treat empty string / {} as "no bindings" so a fixed circuit submits the same as before.
@@ -348,29 +410,81 @@ async function submitJob(
 		validateObservables(observables, this.getNode(), itemIndex);
 		params.resilience_level = this.getNodeParameter('resilienceLevel', itemIndex, 1) as number;
 		const precision = this.getNodeParameter('precision', itemIndex, 0) as number;
-		pub = buildPubData('estimator', qasm3, observables, parameters, 0, precision);
+		pub = buildPubData('estimator', circuit, observables, parameters, 0, precision);
 	} else {
 		const shots = clampCount(this.getNodeParameter('shots', itemIndex, 1024), 1024);
-		pub = buildPubData('sampler', qasm3, null, parameters, shots, 0);
+		pub = buildPubData('sampler', circuit, null, parameters, shots, 0);
 	}
 
 	params.pubs = [pub];
 	if (Object.keys(options).length > 0) params.options = options;
 
-	const body: IDataObject = { program_id: primitive, backend, params };
-	// session_id is a sibling of program_id/backend/params, never inside params.
-	if (sessionId) body.session_id = sessionId;
-	const tags = parseTagList(this.getNodeParameter('jobTags', itemIndex, '') as string);
-	if (tags.length > 0) body.tags = tags;
-	// The API expects the private flag only when set, matching the official client.
-	if (this.getNodeParameter('privateJob', itemIndex, false) === true) body.private = true;
+	body.program_id = primitive;
+	body.backend = backend;
+	body.params = params;
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
 	return { jobId: response.id ?? null, backend, primitive, sessionId: sessionId || null, response };
 }
 
-// Split a comma-separated tag input into clean tag strings.
-export function parseTagList(value: unknown): string[] {
+// The noise learner characterises the noise on a backend's entangling layers. It takes bare
+// circuits rather than PUBs, and its options object is declared additionalProperties:false, so the
+// Sampler and Estimator toggles must never be merged into it.
+async function submitNoiseLearnerJob(
+	this: IExecuteFunctions,
+	ctx: RequestContext,
+	itemIndex: number,
+): Promise<IDataObject> {
+	const { backend, circuit, sessionId, body } = readSubmitEnvelope.call(this, itemIndex);
+	const options = readAdditionalOptions.call(this, itemIndex);
+	const learner = this.getNodeParameter('noiseLearnerOptions', itemIndex, {}) as IDataObject;
+
+	const counts: Array<[string, string]> = [
+		['maxLayersToLearn', 'max_layers_to_learn'],
+		['numRandomizations', 'num_randomizations'],
+		['shotsPerRandomization', 'shots_per_randomization'],
+	];
+	for (const [param, key] of counts) {
+		// Zero means "leave it to IBM", so a missing or non-positive value simply drops the field.
+		const value = clampCount(learner[param], 0);
+		if (value > 0) options[key] = value;
+	}
+
+	const depthsInput = (learner.layerPairDepths as string) ?? '';
+	if (depthsInput.trim()) {
+		let depths: number[];
+		try {
+			depths = parseNumberListStrict(depthsInput, 'Layer Pair Depths');
+		} catch (error) {
+			const message = errorMessage(error);
+			throw new NodeOperationError(this.getNode(), message, { itemIndex });
+		}
+		options.layer_pair_depths = depths;
+	}
+
+	const strategy = learner.twirlingStrategy;
+	if (typeof strategy === 'string' && strategy) options.twirling_strategy = strategy;
+
+	const params: IDataObject = { version: 2, circuits: [circuit] };
+	if (Object.keys(options).length > 0) params.options = options;
+
+	body.program_id = 'noise-learner';
+	body.backend = backend;
+	body.params = params;
+
+	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
+	return {
+		jobId: response.id ?? null,
+		backend,
+		primitive: 'noise-learner',
+		sessionId: sessionId || null,
+		response,
+	};
+}
+
+// Split a comma-separated input into clean values. Used for tags, and for the list filters the
+// analytics endpoints accept.
+export function parseCsvList(value: unknown): string[] {
 	if (typeof value !== 'string' || !value.trim()) return [];
 	return value
 		.split(',')
@@ -478,15 +592,7 @@ async function getResults(
 		} catch (error) {
 			const remaining = deadline - Date.now();
 			if (remaining <= 0 || !isTransientPollError(error)) {
-				// Requests arrive here already wrapped by ibmQuantumApiRequest, whose catch always
-				// returns a NodeApiError, so in practice the first arm always wins and the
-				// constructor call below is unreachable. Kept as a backstop in case the transport
-				// ever stops wrapping.
-				const wrapped =
-					error instanceof NodeApiError || error instanceof NodeOperationError
-						? error
-						: new NodeApiError(this.getNode(), error as JsonObject, { itemIndex });
-				throw wrapped;
+				throw asNodeError(this.getNode(), error, itemIndex);
 			}
 			await sleep(Math.min(intervalSec * 1000, remaining));
 			continue;
@@ -514,6 +620,7 @@ export async function handleJob(
 ): Promise<IDataObject> {
 	if (operation === 'submitSampler') return submitJob.call(this, ctx, 'sampler', itemIndex);
 	if (operation === 'submitEstimator') return submitJob.call(this, ctx, 'estimator', itemIndex);
+	if (operation === 'submitNoiseLearner') return submitNoiseLearnerJob.call(this, ctx, itemIndex);
 	if (operation === 'getResults') return getResults.call(this, ctx, itemIndex);
 	if (operation === 'list') {
 		// IBM caps GET /jobs at 200 and silently substitutes its default above that.
@@ -535,7 +642,7 @@ export async function handleJob(
 		}
 		// tags is an array on the API (up to eight), so a comma-separated input becomes several
 		// values rather than one string that would never match. A single tag still sends one value.
-		const tagFilters = parseTagList(filters.tag);
+		const tagFilters = parseCsvList(filters.tag);
 		if (tagFilters.length > 0) qs.tags = tagFilters;
 		if (filters.pending === 'pending') qs.pending = true;
 		else if (filters.pending === 'finished') qs.pending = false;
@@ -543,6 +650,16 @@ export async function handleJob(
 		const offset = Number(filters.offset);
 		if (Number.isInteger(offset) && offset > 0) qs.offset = offset;
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/jobs', undefined, qs);
+	}
+
+	if (operation === 'listTags') {
+		// The API requires both parameters. `type` has only one value today, so it is sent rather
+		// than offered, and an empty search would be rejected, so it falls back to matching all.
+		const search = (this.getNodeParameter('tagSearch', itemIndex, '') as string).trim();
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/tags', undefined, {
+			type: 'job',
+			search: search || '',
+		});
 	}
 
 	const jobId = this.getNodeParameter('jobId', itemIndex) as string;
@@ -563,7 +680,7 @@ export async function handleJob(
 		return { jobId, logs };
 	}
 	if (operation === 'updateTags') {
-		const tags = parseTagList(this.getNodeParameter('jobTags', itemIndex, '') as string);
+		const tags = parseCsvList(this.getNodeParameter('jobTags', itemIndex, '') as string);
 		// PUT replaces the full tag list and returns 204, so an empty input clears all tags.
 		await ibmQuantumApiRequest.call(this, ctx, 'PUT', `/jobs/${jobId}/tags`, { tags });
 		return { jobId, tags };
@@ -590,7 +707,9 @@ export async function handleSession(
 	itemIndex: number,
 ): Promise<IDataObject> {
 	if (operation === 'create') {
-		const mode = this.getNodeParameter('mode', itemIndex, 'batch') as string;
+		// Version 2 renamed this parameter to sessionMode; version 1 workflows still store `mode`.
+		const modeParam = this.getNode().typeVersion >= 2 ? 'sessionMode' : 'mode';
+		const mode = this.getNodeParameter(modeParam, itemIndex, 'batch') as string;
 		const backend = this.getNodeParameter('sessionBackend', itemIndex) as string;
 		// Zero deliberately means "omit max_ttl and let IBM pick", so this coerces without
 		// substituting a fallback: anything not a positive number simply drops the field.
@@ -624,6 +743,92 @@ export async function handleSession(
 	});
 }
 
+// The workloads listing caps at 50, far below the 200 the jobs listing allows.
+export const MAX_WORKLOAD_LIMIT = 50;
+
+// IBM returns workloads oldest first. Jobs List and both triggers all present newest first, so the
+// node sends the descending sort unless the user picks otherwise.
+const DEFAULT_WORKLOAD_SORT = '-createdAt';
+
+export async function handleWorkload(
+	this: IExecuteFunctions,
+	ctx: RequestContext,
+	operation: string,
+	itemIndex: number,
+): Promise<IDataObject> {
+	if (operation !== 'list') {
+		throw new NodeOperationError(this.getNode(), `Unsupported workload operation: ${operation}`, {
+			itemIndex,
+		});
+	}
+	const limit = clampCount(
+		this.getNodeParameter('limit', itemIndex, MAX_WORKLOAD_LIMIT),
+		MAX_WORKLOAD_LIMIT,
+		MAX_WORKLOAD_LIMIT,
+	);
+	const filters = this.getNodeParameter('workloadFilters', itemIndex, {}) as IDataObject;
+	const qs: IDataObject = { limit };
+
+	const stringFilters: Array<[string, string]> = [
+		['backend', 'backend'],
+		['createdAfter', 'created_after'],
+		['createdBefore', 'created_before'],
+		['next', 'next'],
+		['previous', 'previous'],
+		['search', 'search'],
+		['workloadMode', 'mode'],
+	];
+	for (const [param, key] of stringFilters) {
+		const value = filters[param];
+		if (typeof value === 'string' && value.trim() !== '') qs[key] = value.trim();
+	}
+
+	const tags = parseCsvList(filters.tags);
+	if (tags.length > 0) qs.tags = tags;
+	if (Array.isArray(filters.status) && filters.status.length > 0) qs.status = filters.status;
+	qs.sort = typeof filters.sort === 'string' && filters.sort ? filters.sort : DEFAULT_WORKLOAD_SORT;
+
+	return ibmQuantumApiRequest.call(this, ctx, 'GET', '/workloads', undefined, qs);
+}
+
+const ANALYTICS_ENDPOINTS: Record<string, string> = {
+	getAnalytics: '/analytics/usage',
+	getAnalyticsGrouped: '/analytics/usage_grouped',
+	getAnalyticsByDate: '/analytics/usage_grouped_by_date',
+};
+
+// The three usage analytics endpoints take one shared filter set. List values go out as repeated
+// keys, the encoding transport already applies and the only one the API reads.
+function analyticsQuery(this: IExecuteFunctions, itemIndex: number): IDataObject {
+	const filters = this.getNodeParameter('analyticsFilters', itemIndex, {}) as IDataObject;
+	const qs: IDataObject = {};
+
+	const listFilters: Array<[string, string]> = [
+		['backend', 'backend'],
+		['instance', 'instance'],
+		['plan', 'plan'],
+		['subscriptionId', 'subscription_id'],
+		['userId', 'user_id'],
+	];
+	for (const [param, key] of listFilters) {
+		const values = parseCsvList(filters[param]);
+		if (values.length > 0) qs[key] = values;
+	}
+
+	const dateFilters: Array<[string, string]> = [
+		['intervalStart', 'interval_start'],
+		['intervalEnd', 'interval_end'],
+	];
+	for (const [param, key] of dateFilters) {
+		const value = filters[param];
+		if (typeof value === 'string' && value.trim() !== '') qs[key] = value.trim();
+	}
+
+	// The API already defaults simulators to true, so only the opt-out needs sending.
+	if (filters.simulators === false) qs.simulators = false;
+	return qs;
+}
+
 export async function handleAccount(
 	this: IExecuteFunctions,
 	ctx: RequestContext,
@@ -638,6 +843,32 @@ export async function handleAccount(
 	}
 	if (operation === 'getInstance') {
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instance');
+	}
+	if (operation === 'getAnalyticsFilters') {
+		// Returns the filter values this caller may use, so it takes no query of its own.
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/analytics/filters');
+	}
+	if (operation === 'getApiVersions') {
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/versions');
+	}
+	const analyticsEndpoint = ANALYTICS_ENDPOINTS[operation];
+	if (analyticsEndpoint) {
+		const qs = analyticsQuery.call(this, itemIndex);
+		if (operation === 'getAnalyticsGrouped') {
+			qs.group_by = this.getNodeParameter('groupBy', itemIndex, 'backend') as string;
+		}
+		// The by-date endpoint requires group_by and accepts only this one value.
+		if (operation === 'getAnalyticsByDate') qs.group_by = 'instance';
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', analyticsEndpoint, undefined, qs);
+	}
+	if (operation === 'setCostLimit') {
+		const requested = Math.floor(Number(this.getNodeParameter('instanceLimit', itemIndex, 0)));
+		// Zero clears the limit, which the API expresses as an explicit null rather than an absent key.
+		const instanceLimit = Number.isFinite(requested) && requested > 0 ? requested : null;
+		await ibmQuantumApiRequest.call(this, ctx, 'PUT', '/instances/configuration', {
+			instance_limit: instanceLimit,
+		});
+		return { instanceLimit };
 	}
 	throw new NodeOperationError(this.getNode(), `Unsupported account operation: ${operation}`, {
 		itemIndex,

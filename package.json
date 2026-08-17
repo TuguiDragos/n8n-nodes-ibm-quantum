@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-ibm-quantum",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Verified n8n community node for IBM Quantum. Build OpenQASM 3 circuits, submit to Qiskit Runtime, and trigger on job completion or failure. Usable as an AI Agent tool.",
   "keywords": [
     "n8n-community-node-package",
@@ -11,6 +11,8 @@
     "openqasm",
     "quantum-computing",
     "quantum",
+    "qpu",
+    "ibm-cloud",
     "ai-agent",
     "automation",
     "trigger"
@@ -34,7 +36,7 @@
   },
   "main": "index.js",
   "scripts": {
-    "build": "tsc && node scripts/copy-icons.mjs",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "dev": "tsc --watch",
     "format": "prettier nodes credentials --write",
     "format:check": "prettier nodes credentials --check",
@@ -48,10 +50,13 @@
   },
   "files": [
     "dist",
-    "index.js"
+    "index.js",
+    "llms.txt",
+    "llms-full.txt"
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,
+    "strict": true,
     "credentials": [
       "dist/credentials/IbmQuantumApi.credentials.js"
     ],
@@ -68,15 +73,15 @@
     "n8n-workflow": "*"
   },
   "devDependencies": {
-    "@n8n/eslint-plugin-community-nodes": "^0.27.0",
-    "@types/node": "^26.1.2",
+    "@n8n/eslint-plugin-community-nodes": "^0.29.0",
+    "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "9.29.0",
     "eslint-plugin-n8n-nodes-base": "^1.16.7",
-    "n8n-workflow": "2.32.1",
+    "n8n-workflow": "2.34.3",
     "prettier": "^3.9.6",
     "typescript": "^5.9.0",
-    "typescript-eslint": "^8.65.0",
+    "typescript-eslint": "^8.67.0",
     "vitest": "^4.1.10"
   }
 }

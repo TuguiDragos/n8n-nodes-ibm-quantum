@@ -12,12 +12,11 @@ export default defineConfig({
 			include: ['nodes/IbmQuantum/**/*.ts', 'credentials/**/*.ts'],
 			exclude: ['nodes/IbmQuantum/descriptions.ts', 'nodes/IbmQuantum/**/*.node.ts'],
 			reporter: ['text', 'html'],
-			// Set just under the current actuals, so a regression trips the gate rather than
-			// quietly eroding the suite. Raise them again when coverage climbs.
-			// Just under the current actuals, so a regression trips the gate rather than quietly
-			// eroding the suite. Branches stop short of 100 because a handful of guards are
-			// unreachable by construction (see the note in results.ts and getResults).
-			thresholds: { lines: 100, statements: 99, functions: 100, branches: 97 },
+			// Every branch in the covered modules is now reachable and tested, so the gate is a flat
+			// 100. The defensive paths that used to sit below it were either dead code that has been
+			// removed, or duplicated narrowing that now lives in one tested helper each
+			// (errorMessage and asNodeError in transport.ts). Adding an untested line fails the build.
+			thresholds: { lines: 100, statements: 100, functions: 100, branches: 100 },
 		},
 	},
 });

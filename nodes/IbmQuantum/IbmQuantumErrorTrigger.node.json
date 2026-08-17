@@ -1,0 +1,19 @@
+{
+	"node": "n8n-nodes-ibm-quantum.ibmQuantumErrorTrigger",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["Development", "Analytics"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#credentials"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#long-running-jobs"
+			}
+		]
+	},
+	"alias": ["Quantum", "Qiskit", "QPU", "Error", "Failed", "Canceled", "Alert"]
+}

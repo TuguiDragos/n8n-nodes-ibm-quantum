@@ -1,6 +1,11 @@
-import { type IDataObject, type INodeExecutionData, type IPollFunctions } from 'n8n-workflow';
+import {
+	NodeOperationError,
+	type IDataObject,
+	type INodeExecutionData,
+	type IPollFunctions,
+} from 'n8n-workflow';
 
-import { enrichApiError, getBaseUrl } from './transport';
+import { checkApiVersion, enrichApiError, getBaseUrl } from './transport';
 
 // Shared polling loop for the IBM Quantum triggers. Fetch recent jobs, apply a match predicate,
 // dedupe via workflow static data, and map each emitted job. Manual runs return a sample without
@@ -13,6 +18,10 @@ export async function pollJobs(
 	extraQs: IDataObject = {},
 ): Promise<INodeExecutionData[][] | null> {
 	const credentials = await poll.getCredentials('ibmQuantumApi');
+	// Only the fatal case is raised here. A deprecation warning belongs to the action node, which
+	// runs on demand; a trigger polls on a schedule and would repeat the same line indefinitely.
+	const problem = checkApiVersion(credentials.apiVersion);
+	if (problem?.fatal) throw new NodeOperationError(poll.getNode(), problem.message);
 	const baseUrl = getBaseUrl(credentials.region as string);
 
 	let response: IDataObject;

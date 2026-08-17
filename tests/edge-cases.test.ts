@@ -121,7 +121,7 @@ describe('buildQasm3 rejects a gate the renderer does not know', () => {
 describe('pollJobs surfaces a failed listing request', () => {
 	it('wraps the transport error rather than swallowing it', async () => {
 		const ctx = {
-			getCredentials: async () => ({ region: 'us-east' }),
+			getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 			getMode: () => 'trigger',
 			getNode: () => fakeNode(),
 			getWorkflowStaticData: () => ({}),
@@ -141,7 +141,7 @@ describe('pollJobs surfaces a failed listing request', () => {
 	it('reads the jobs array from a bare-array response shape', async () => {
 		const staticData: Record<string, unknown> = { seenJobIds: [] };
 		const ctx = {
-			getCredentials: async () => ({ region: 'us-east' }),
+			getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 			getMode: () => 'trigger',
 			getNode: () => fakeNode(),
 			getWorkflowStaticData: () => staticData,
@@ -205,7 +205,7 @@ describe('response shapes the API can legitimately return', () => {
 
 	it('reads the job list from the workloads key, and copes with neither key present', async () => {
 		const make = (body: unknown) => ({
-			getCredentials: async () => ({ region: 'us-east' }),
+			getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 			getMode: () => 'trigger',
 			getNode: () => fakeNode(),
 			getWorkflowStaticData: () => ({ seenJobIds: [] }),

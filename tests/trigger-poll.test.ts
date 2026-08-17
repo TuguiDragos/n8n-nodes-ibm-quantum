@@ -18,7 +18,7 @@ function makeContext(
 	const defaults: Record<string, unknown> = { statusFilter: 'any', tagFilter: '', limit: 20 };
 	const ctx = {
 		getNodeParameter: (name: string) => (name in params ? params[name] : defaults[name]),
-		getCredentials: async () => ({ region: 'us-east' }),
+		getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 		getMode: () => mode,
 		getNode: () => ({ name: 'IBM Quantum Trigger' }),
 		getWorkflowStaticData: () => staticData,
@@ -136,7 +136,7 @@ describe('IbmQuantumTrigger.poll response normalization (TEST-10)', () => {
 		const defaults: Record<string, unknown> = { statusFilter: 'any', tagFilter: '', limit: 20 };
 		return {
 			getNodeParameter: (name: string) => defaults[name],
-			getCredentials: async () => ({ region: 'us-east' }),
+			getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
 			getMode: () => mode,
 			getNode: () => ({ name: 'IBM Quantum Trigger' }),
 			getWorkflowStaticData: () => ({}),

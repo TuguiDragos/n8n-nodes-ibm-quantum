@@ -7,7 +7,7 @@ import {
 	type IPollFunctions,
 } from 'n8n-workflow';
 
-import { extractJobStatus, parseTagList } from './operations';
+import { extractJobStatus, parseCsvList } from './operations';
 import { extractStateError, isErrorStatus, pollJobs } from './triggerPoll';
 
 export class IbmQuantumErrorTrigger implements INodeType {
@@ -23,12 +23,10 @@ export class IbmQuantumErrorTrigger implements INodeType {
 		documentationUrl: 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme',
 		defaults: { name: 'IBM Quantum Error Trigger' },
 		polling: true,
-		// The verification ruleset (node-usable-as-tool) requires the property to be present; the
-		// n8n-workflow type then narrows it to `true | UsableAsToolDescription`, so `false` does not
-		// compile and there is no way to opt out. n8n consequently generates a tool variant of this
-		// trigger that an AI Agent cannot actually run, since the class implements poll() and not
-		// execute(). Nothing to do about it here: both constraints are upstream.
-		usableAsTool: true,
+		// usableAsTool is deliberately absent. The verification ruleset that once required it on
+		// every node (0.3.3 shipped it under protest) now forbids it on triggers, and rightly so: a
+		// tool variant of a polling trigger can never run, since the class implements poll() and
+		// not execute(). See @n8n/eslint-plugin-community-nodes 0.29.0, rule node-usable-as-tool.
 		inputs: [],
 		outputs: [NodeConnectionTypes.Main],
 		credentials: [{ name: 'ibmQuantumApi', required: true }],
@@ -70,7 +68,7 @@ export class IbmQuantumErrorTrigger implements INodeType {
 	async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
 		const errorFilter = this.getNodeParameter('errorFilter', 'any') as string;
 		const limit = this.getNodeParameter('limit', 50) as number;
-		const tagFilters = parseTagList(this.getNodeParameter('tagFilter', ''));
+		const tagFilters = parseCsvList(this.getNodeParameter('tagFilter', ''));
 		return pollJobs(
 			this,
 			limit,

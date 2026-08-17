@@ -28,7 +28,7 @@ Verified by n8n, so it installs on n8n Cloud as well as self-hosted. Zero runtim
 
 ### What it does
 
-Three nodes ship in the package. In the n8n picker they carry an **(Unofficial)** marker, to keep them clearly distinct from anything IBM publishes.
+3 nodes ship in the package. In the n8n picker they carry an **(Unofficial)** marker, to keep them clearly distinct from anything IBM publishes.
 
 | node | type | what it is for |
 | :-- | :-- | :-- |
@@ -36,15 +36,16 @@ Three nodes ship in the package. In the n8n picker they carry an **(Unofficial)*
 | **IBM Quantum (Unofficial) Trigger** | polling trigger | Fires when a job reaches a terminal state |
 | **IBM Quantum Error (Unofficial) Trigger** | polling trigger | Fires only on failure or cancellation, with the reason |
 
-Twenty four operations across five resources.
+34 operations across 6 resources.
 
 | resource | operations |
 | :-- | :-- |
-| **Backend** | List, Get Configuration, Get Properties, Get Status, Get Least Busy |
+| **Backend** | List, Get Configuration, Get Defaults, Get Properties, Get Status, Get Least Busy |
 | **Circuit** | Build (from a gate list), Import OpenQASM 3 |
-| **Job** | Submit to Sampler, Submit to Estimator, Get Status, Get Results, Get Logs, Get Metrics, List (with filters), Update Tags, Cancel, Delete |
+| **Job** | Submit to Sampler, Submit to Estimator, Submit to Noise Learner, Get Status, Get Results, Get Logs, Get Metrics, List (with filters), List Tags, Update Tags, Cancel, Delete |
+| **Workload** | List (jobs, sessions and batches together, with cursor paging) |
 | **Session** | Create (batch or dedicated), Get, Set Accepting Jobs, Close |
-| **Account** | Get Usage, Get Instance, Get Configuration |
+| **Account** | Get Usage, Get Instance, Get Configuration, Get API Versions, Get Usage Analytics, Get Usage Analytics Grouped, Get Usage Analytics Grouped by Date, Get Usage Analytics Filters, Set Cost Limit |
 
 <p align="center">
   <img src="./readme-assets/01-trigger-picker.png" alt="Both trigger nodes in the n8n trigger picker" width="460">
@@ -55,7 +56,7 @@ Twenty four operations across five resources.
   <img src="./readme-assets/02-actions-a.png" alt="Trigger, Account and Backend actions" width="330">
   <img src="./readme-assets/03-actions-b.png" alt="Circuit, Job and Session actions" width="330">
 </p>
-<p align="center"><sub>All five resources and their operations in the node's action list.</sub></p>
+<p align="center"><sub>All 6 resources and their operations in the node's action list.</sub></p>
 
 <br>
 
@@ -69,7 +70,24 @@ The action node sets `usableAsTool`, so it can be attached to an n8n **AI Agent*
 
 Submission works too, but the agent has to supply a circuit the backend accepts. On real hardware that means a transpiled ISA circuit, so pair it with a pre-built circuit rather than asking the model to write one. See [Transpilation](#transpilation).
 
-The two trigger nodes also set `usableAsTool`, because the n8n verification ruleset requires the property and the type allows only `true`. n8n then lists a tool variant of each trigger. Ignore those: a polling trigger has nothing for an agent to call. Attach the action node instead.
+The two trigger nodes carry no `usableAsTool`: a polling trigger has nothing for an agent to call, and the verification ruleset now forbids the property on triggers. Until 0.3.3 the same ruleset required it on every node, so n8n listed a tool variant of each trigger that could never actually run; if you still see those variants, ignore them and attach the action node.
+
+The action node also ships a tool-specific description, written for the model rather than for the node picker, so an agent knows which calls are safe to make unprompted and why it cannot invent a circuit for real hardware. On self-hosted n8n, using an *unverified* community node as an agent tool additionally requires `N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true`; this package is verified, so that flag is not needed for it.
+
+<br>
+
+### Docs for AI assistants
+
+The repository follows the [llms.txt](https://llmstxt.org) convention. [`llms.txt`](./llms.txt) is the index; [`llms-full.txt`](./llms-full.txt) is a complete machine-oriented reference: every operation, every parameter under its internal name, output shapes, error codes, a runnable workflow JSON and the hardware pitfalls. Hand either file to an LLM before asking it to build workflows with this node, and it will stop guessing parameter names.
+
+Both files ship inside the npm tarball as well as sitting in the repository, so an assistant can reach them three ways: from a checkout, from the installed package, or by URL.
+
+```
+https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/llms.txt
+https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/llms-full.txt
+```
+
+The action node's codex file lists the second URL alongside this README, so tooling that reads node metadata finds it without being told. [AGENTS.md](AGENTS.md) is the companion for agents changing the code rather than using it.
 
 <br>
 
@@ -83,7 +101,7 @@ A full walkthrough: creating the credential, wiring the nodes and running a circ
 
 ## Articles
 
-- [My IBM Quantum node for n8n is now live](https://tuguidragos.com/ibm-quantum-node-for-n8n/). The launch, the n8n verification, and what the three nodes do.
+- [My IBM Quantum node for n8n is now live](https://tuguidragos.com/ibm-quantum-node-for-n8n/). The launch, the n8n verification, and what the 3 nodes do.
 - [Running Quantum Circuits on Real IBM Hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/). An end-to-end Bell state on a real QPU (ibm_kingston), including the transpilation step that trips up most first attempts.
 - [Six defects in a verified n8n node for IBM Quantum](https://tuguidragos.com/six-defects-verified-n8n-node-ibm-quantum/). What 121 seconds of real QPU time found that green tests and 98 percent coverage could not, including the identity gate that fails every job despite being listed as native, and why a failed circuit still costs you quota.
 
@@ -113,7 +131,7 @@ Create an **IBM Quantum API** credential with four fields.
 | **API Key** | [IBM Cloud, Manage &rsaquo; Access (IAM) &rsaquo; API keys](https://cloud.ibm.com/iam/apikeys). Copy it immediately, it is shown once. The node exchanges it for a short-lived IAM token at request time. |
 | **Instance CRN** | The [IBM Quantum Platform instances page](https://quantum.cloud.ibm.com/instances). Starts with `crn:v1`, sent as the `Service-CRN` header. |
 | **Region** | US East or EU (Germany), matching your instance. This picks the API host, and the two are separate. |
-| **API Version** | The date in the `IBM-API-Version` header, which selects the response schema. Defaults to `2026-04-15`; change it only when [IBM's REST API reference](https://quantum.cloud.ibm.com/docs/en/api/qiskit-runtime-rest) calls for a newer one. |
+| **API Version** | The date in the `IBM-API-Version` header, which selects the response schema. Defaults to `2026-04-15`, the only version IBM does not list as deprecated; change it only when [IBM's REST API reference](https://quantum.cloud.ibm.com/docs/en/api/qiskit-runtime-rest) calls for a newer one. The node checks the field before every run: a value that is not a real date fails immediately with a message naming the field, and an older-but-still-live date logs a warning rather than blocking a credential that works today. Every version before `2026-04-15` has a published sunset during 2027. |
 
 The credential ships a test that calls the backends endpoint, so the **Test** button confirms all four fields at once. If you would rather watch it done, the [setup walkthrough](https://youtu.be/6ppR6uCt1_o) covers this screen.
 
@@ -128,7 +146,7 @@ The credential ships a test that calls the backends endpoint, so the **Test** bu
 
 ## A first workflow
 
-Four nodes that prepare a Bell state, pick a backend, run it and read the counts.
+4 nodes that prepare a Bell state, pick a backend, run it and read the counts.
 
 1. **Circuit &rsaquo; Build.** Number of Qubits `2`, Number of Classical Bits `2`. Gates in order: Hadamard on `0`; CNOT/CX on `0,1`; Measure on `0` with Classical Bit `0`; Measure on `1` with Classical Bit `1`. Outputs `qasm3`, `numQubits`, `numClbits`, `gateCount`.
 2. **Backend &rsaquo; Get Least Busy.** Minimum Qubits `2`, Include Simulators off. Outputs `leastBusy`.
@@ -183,6 +201,8 @@ Hybrid loops (VQE, QAOA) submit many circuits in sequence, adjusting parameters 
 
 Use **Account &rsaquo; Get Usage** to check `usage_consumed_seconds` against `usage_limit_seconds` before launching a large run.
 
+Batch is the only mode the Open plan allows. The current plan lineup is Open, Pay-As-You-Go, Flex, Premium and On-Prem, and the Open allowance is 600 seconds per rolling 28 days rather than per calendar month.
+
 <br>
 
 ---
@@ -234,14 +254,19 @@ Bad input is caught at build time, not at IBM: the wrong number of qubits or par
 
 ## Primitives and options
 
-Submit is split per primitive, because their inputs differ.
+Submit is split per program, because their inputs differ.
 
 - **Submit to Sampler** returns measurement counts. Set **Shots**.
 - **Submit to Estimator** returns expectation values. Set **Observables** to a Pauli string whose length matches the qubit count (`ZZ` for two qubits) or an array of them, pick a **Resilience Level**, and optionally a **Precision**.
+- **Submit to Noise Learner** returns the noise itself rather than a result: it characterises the Pauli-Lindblad error channels on the entangling layers your circuit uses, which is what error mitigation consumes underneath. It takes the same circuit and its own options (**Max Layers to Learn**, **Number of Randomizations**, **Shots per Randomization**, **Layer Pair Depths**, **Twirling Strategy**), each of which can be left at zero to let IBM choose. Note that randomizations multiply shots, so this is the easiest way to spend a lot of quota quickly; pair it with **Max Cost**.
 
 Both share the error-suppression toggles that matter on hardware: **Dynamical Decoupling**, **Gate Twirling**, **Measurement Twirling**. Leave Gate Twirling off for a circuit containing fractional gates, meaning a parametrised `rx` or `rzz`, which includes anything Qiskit transpiles for a Heron processor: IBM refuses that combination with "gate twirling does not support fractional gates". The other two have no such restriction. For parametrized circuits, **Parameters** takes a JSON object binding names to values, e.g. `{"theta": 1.5708}`. **Additional Options** is a JSON escape hatch merged into the primitive `options`, e.g. `{"default_shots": 4096}`.
 
 Both also accept **Tags** (comma separated, stored on the job and usable as a filter in Job List and in both triggers) and a **Private** toggle that hides the job's inputs and results from collaborators, on plans that support private jobs.
+
+**Max Cost** caps how many runtime seconds a job may consume before IBM cancels it. Zero, the default, lets the program decide; IBM allows at most 10800 (3 hours) and the node clamps anything larger. It is worth setting on the Open plan, where the entire allowance is 600 seconds per 28 days and a single runaway job can spend it. For a ceiling across every job on the instance rather than one, use Account &rsaquo; Set Cost Limit.
+
+**Circuit Format** picks how the circuit is written. OpenQASM 3 is the default and the text form the Circuit resource builds. Choosing QPY instead swaps that field for **QPY Circuit**, which takes Qiskit's binary format base64 encoded, preserving circuits OpenQASM 3 cannot express; produce it with `qiskit.qpy.dump(circuit, buffer)` into a `BytesIO` and base64 the bytes. Either way the circuit still has to be ISA for the chosen backend, and either way the node validates it locally before spending a submission.
 
 ### Finding jobs again
 
@@ -251,16 +276,28 @@ Both also accept **Tags** (comma separated, stored on the job and usable as a fi
 | :-- | :-- |
 | **Backend** | Jobs that ran on one device |
 | **Program** | Sampler jobs or Estimator jobs |
-| **Tags** | Jobs carrying every tag you list, comma separated, up to the eight the API accepts |
+| **Tags** | Jobs carrying every tag you list, comma separated, up to the 8 the API accepts |
 | **Session ID** | Jobs that ran inside one session or batch |
 | **Status** | All, only finished, or only queued and running |
 | **Created After** / **Created Before** | A time window |
 | **Sort** / **Offset** | Order and paging |
 | **Include Circuit Params** | Brings each job's submitted circuit back into the response, which is omitted by default to keep listings small |
 
-Tags are the practical way to find your own work on a shared instance: set them on Submit, filter on them here and in both triggers.
+Tags are the practical way to find your own work on a shared instance: set them on Submit, filter on them here and in both triggers. **Job &rsaquo; List Tags** shows which tags actually exist, optionally narrowed by a substring, which saves guessing at a name you set weeks ago.
+
+**Log Level** on any Submit raises the verbosity IBM records for that job, and Get Logs reads it back afterwards. Leave it on Default unless you are chasing a failure.
+
+**Workload &rsaquo; List** answers the question Job List cannot: it returns jobs, sessions and batches in one listing, with a free-text **Search** over IDs and tags and a **Mode** filter to keep only one kind. It pages by cursor rather than by offset, so a response carries the cursors you feed back into **Next Cursor** or **Previous Cursor**, and IBM caps it at 50 per call rather than the 200 Job List allows.
+
+### Watching the quota
+
+**Account &rsaquo; Get Usage** is the quick check. For reporting, the analytics operations return the same spend broken down: **Get Usage Analytics** for totals, **Get Usage Analytics Grouped**, whose **Group By** field takes backend, instance, plan, user or subscription, and **Get Usage Analytics Grouped by Date** for a time series. All three take the same Filters collection (backends, instances, plans, users, subscriptions, a date window, and whether to count simulators), and **Get Usage Analytics Filters** lists the values your account may filter on. None of them consume QPU time, so a Schedule Trigger plus Get Usage Analytics Grouped is a cheap monthly spend report.
+
+**Account &rsaquo; Set Cost Limit** writes the instance-wide ceiling in runtime seconds; IBM cancels running jobs with "Ran too long" once it is passed. Zero removes the limit.
 
 **Bit order.** Sampler counts follow the classical register: `c[0]` is the rightmost bit of each bitstring, the standard Qiskit convention. Samples arrive as hex and are decoded with BigInt, so registers wider than 53 bits keep every bit instead of silently collapsing distinct outcomes. A sample the parser cannot read is dropped rather than folded into a neighbouring outcome, and the pub then carries `unparsedSamples` so the gap between `counts` and `shots` is visible instead of silent.
+
+Get Results detects the classical register on its own. **Register Name** overrides that, for the rare circuit that declares more than one and you want the counts from a specific register.
 
 <br>
 
@@ -287,7 +324,7 @@ That is not a node bug. The node builds, submits and reads the job correctly; th
 
 Transpiling is the general answer, but for small circuits you can skip it entirely: build straight from the native gate set with the Circuit Build operation. The palette already contains everything a Heron processor runs, so an ISA circuit needs no external tooling at all.
 
-Two identities do most of the work:
+2 identities do most of the work:
 
 ```
 H            = rz(pi/2) . rx(pi/2) . rz(pi/2)      (up to a global phase)
@@ -307,6 +344,8 @@ A Bell state built that way, with 13 gate entries and no Qiskit anywhere, runs a
 | Measure | `1` | Classical Bit `1` |
 
 On `ibm_marrakesh` over 2048 shots that gives 51.1% `00` and 46.2% `11`, with 2.7% leaking into `01` and `10` from readout noise: the correlation an entangled pair should show.
+
+This holds on Heron processors, which is the fleet an Open plan sees (`ibm_fez`, `ibm_kingston`, `ibm_marrakesh`, `ibm_torino`). It does not hold everywhere: a parametrised `rx` is a *fractional* gate, and IBM's newer **Nighthawk** processors (`ibm_miami`, `ibm_berlin`, on Premium and Flex) run `cz`, `id`, `rz`, `sx`, `x` with no fractional `rx`, so the recipe above will not run there and the circuit has to be transpiled for that device. Fractional gates are also incompatible with Gate Twirling and with the ZNE and PEC mitigation behind Estimator resilience level 2.
 
 Gates that are safe to use this way: **X, RX, RZ, CZ, Reset, Barrier, Measure**. A Heron backend also lists `sx` and `rzz` among its basis gates, but neither is offered here: `sx` has no OpenQASM 3 spelling the palette can emit without going through the builtin `U`, and `rzz` is rejected by IBM's OpenQASM parser outright, verified against `ibm_kingston`. `rx` covers what `sx` would give you. Everything else in the palette (`h`, `cx`, `u`, `swap`, `ccx`, the daggered gates) is defined by the OpenQASM 3 standard library in terms of the builtin `U`, which hardware rejects, so those need a transpiler pass first. Identity is a special case: it is accepted but emits nothing, because `stdgates.inc` defines it as `U(0, 0, 0)` and it would otherwise fail every job it appears in.
 
@@ -380,6 +419,8 @@ Simulators accept any gate and need no transpilation, so **Include Simulators** 
 | **Get Results never completes** | A large hardware queue exceeded Max Wait. Raise it, or submit and use the trigger instead of blocking. |
 | **Job fails with `reason_code: 1517`** | The circuit was not transpiled to the backend's native gates. See [Transpilation](#transpilation). |
 | **Submit rejected by IBM** | Observables length does not match the qubit count, or the circuit is not valid ISA for the chosen backend. |
+| **"is not a YYYY-MM-DD date"** | The credential's API Version field holds something that is not a real date. Set it back to `2026-04-15`. Account &rsaquo; Get API Versions lists what IBM currently serves. |
+| **Submissions failing in bursts** | IBM rate-limits job submission to five per minute per user. Space them out, or run them inside a session. |
 
 Errors coming back from IBM are unwrapped before they reach you. IBM returns `{ errors: [{ code, message, solution }] }`, which n8n's default error handling never reads, so it would show a generic "Bad request". The node pulls the real message out, and IBM's suggested solution becomes the error description.
 
@@ -392,14 +433,17 @@ Errors coming back from IBM are unwrapped before they reach you. IBM returns `{ 
 ```bash
 npm install      # on Node 24+: npm install --ignore-scripts
 npm run lint     # ESLint with the n8n community node ruleset
-npm run build    # compile TypeScript and copy icons into dist
+npm run build    # compile TypeScript, then copy icons and codex files into dist
 npm test         # Vitest, the full unit suite
+npm run test:coverage  # the same suite against the coverage gate
 npm run scan     # the official n8n community package scanner
 ```
 
-All four run in CI on Node 22 and 24. `isolated-vm`, a native transitive dev dependency pulled in by `n8n-workflow`, is not needed to lint, build or test, which is why install scripts are skipped.
+Lint, build and coverage run in CI on Node 22 and 24. Coverage is a gate rather than a report: the thresholds are 100 for statements, branches, functions and lines, so an untested line fails the build. `isolated-vm`, a native transitive dev dependency pulled in by `n8n-workflow`, is not needed to lint, build or test, which is why install scripts are skipped. The build step runs `scripts/copy-assets.mjs` after `tsc`, because TypeScript compiles neither the icons nor the codex `.node.json` files.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) for the full workflow, [SECURITY.md](SECURITY.md) for reporting a vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
+`npm run scan` is worth running on a schedule of its own, not only before a release. The n8n verification ruleset changes independently of this repository and has already broken a release that was compliant when it shipped, so a package can go from passing to failing while sitting untouched on npm.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) for the full workflow, [AGENTS.md](AGENTS.md) if you are pointing an AI coding agent at this repository, [SECURITY.md](SECURITY.md) for reporting a vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 **Releasing.** `publish.yml` publishes to npm when a GitHub release is created, after verifying that the `package.json` version matches the release tag. Authentication is npm **trusted publishing** over OIDC: the job holds `id-token: write` and exchanges a short-lived, workflow-scoped credential for publish rights, so there is no token stored in the repository and nothing to rotate. Provenance attestations are generated automatically on that path. The job runs on Node 24 rather than 22 because trusted publishing needs npm 11.5.1 or newer and Node 22 still ships npm 10.9.x.
 
@@ -409,7 +453,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT
 
 ## Notes on the live API
 
+IBM renamed the service **IBM Quantum Compute Service** in July 2026. The endpoints, headers and payloads are unchanged, so the rename affects only what the documentation calls it.
+
 Request and response shapes follow the published Qiskit Runtime REST API reference. The job body sends the primitive as `program_id`, the circuit inside a PUB, and `version` 2 in `params`, with `resilience_level` at the params level for the Estimator. Sampler results are read from `results[i].data[register].samples` as hex strings. The least busy backend is chosen from the backends list, which already carries status, qubit count and queue length per device. Array query parameters are sent as repeated keys (`tags=a&tags=b`), the form the API recognises; the default bracket encoding is ignored by IBM, which would make a tag filter quietly return everything. Every request carries a 30 second timeout so a hung connection cannot stall an execution.
+
+IBM's own limits are worth knowing before a busy workflow meets them: job submission is rate limited to five per minute per user, a job payload may not exceed 50 MB, a single job may run at most 3 hours, and a Sampler job is capped at ten million executions. Job data is retained for 3 years.
+
+The action node is on **typeVersion 2**. The only difference from version 1 is the internal name of the session mode parameter, renamed from `mode` to `sessionMode`: n8n's MCP server treats a parameter literally called `mode` as a node discriminator and drops it from the type definitions it gives AI workflow builders, so on version 1 an agent could not choose between a batch and a dedicated session. Existing version 1 workflows keep working untouched, and both parameters are exercised by the test suite.
 
 <br>
 

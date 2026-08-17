@@ -76,6 +76,7 @@ describe('handleBackend dispatch', () => {
 
 	it.each([
 		['getConfiguration', 'configuration'],
+		['getDefaults', 'defaults'],
 		['getProperties', 'properties'],
 		['getStatus', 'status'],
 	])('routes %s to the matching /backends/:name endpoint', async (operation, suffix) => {
@@ -94,8 +95,8 @@ describe('handleBackend dispatch', () => {
 			params: { backendName: 'ibm_fez' },
 			http: () => ({}),
 		});
-		await expect(handleBackend.call(ctx, TEST_CTX, 'defaults', 0)).rejects.toThrow(
-			/Unsupported backend operation: defaults/,
+		await expect(handleBackend.call(ctx, TEST_CTX, 'getCalibration', 0)).rejects.toThrow(
+			/Unsupported backend operation: getCalibration/,
 		);
 		expect(requests).toHaveLength(0);
 	});

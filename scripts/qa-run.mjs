@@ -49,7 +49,8 @@ function webhook(path, mode = 'onReceived') {
 function ibm(name, params) {
 	// The node declares the credential as required for every operation (even local circuit
 	// build/import), so always attach it or activation fails validation.
-	return { id: name.replace(/\s+/g, '_'), name, type: IBM, typeVersion: 1,
+	// typeVersion 2 is what a new node gets, so QA must exercise that path and not version 1.
+	return { id: name.replace(/\s+/g, '_'), name, type: IBM, typeVersion: 2,
 		position: [X += 220, 0], parameters: params, credentials: CRED };
 }
 function chain(names) {
@@ -152,6 +153,16 @@ async function main() {
 		ibm('backend getStatus', { resource: 'backend', operation: 'getStatus', backendName: BACKEND }),
 		ibm('backend getConfiguration', { resource: 'backend', operation: 'getConfiguration', backendName: BACKEND }),
 		ibm('backend getProperties', { resource: 'backend', operation: 'getProperties', backendName: BACKEND }),
+		ibm('backend getDefaults', { resource: 'backend', operation: 'getDefaults', backendName: BACKEND }),
+		ibm('workload list', { resource: 'workload', operation: 'list', limit: 10,
+			workloadFilters: { workloadMode: 'job', status: ['completed'] } }),
+		ibm('account getConfiguration', { resource: 'account', operation: 'getConfiguration' }),
+		ibm('account analytics', { resource: 'account', operation: 'getAnalytics' }),
+		ibm('account analytics grouped', { resource: 'account', operation: 'getAnalyticsGrouped', groupBy: 'backend' }),
+		ibm('account analytics by date', { resource: 'account', operation: 'getAnalyticsByDate' }),
+		ibm('account analytics filters', { resource: 'account', operation: 'getAnalyticsFilters' }),
+		ibm('account api versions', { resource: 'account', operation: 'getApiVersions' }),
+		ibm('job list tags', { resource: 'job', operation: 'listTags', tagSearch: '' }),
 		ibm('circuit build', BELL),
 		ibm('circuit import', { resource: 'circuit', operation: 'import',
 			qasm3Input: 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nbit[1] c;\nh q[0];\nc[0] = measure q[0];' }),
@@ -159,12 +170,81 @@ async function main() {
 	const idA = await createWf('[QA] Read-only smoke', nodesA, chain(nodesA.map((n) => n.name)), true);
 	report('Read-only smoke', await runWebhook(idA, 'qa-readonly', { timeout: 60000 }));
 
+	// ---- Phase 2b: the guards that must fire locally, before a request is ever sent.
+	// Every node here is expected to FAIL. A green mark in this phase is the bug.
+	console.log('\n[2b] Local guards (each node must fail, and spend no quota)...');
+	const nodesG = [
+		webhook('qa-guards'),
+		ibm('reject non-qasm', { resource: 'job', operation: 'submitSampler', backend: BACKEND,
+			circuitFormat: 'qasm3', qasm3: 'this is not qasm', shots: 1 }),
+	];
+	const idG = await createWf('[QA] Local guards', nodesG, chain(nodesG.map((n) => n.name)), true);
+	const execG = await runWebhook(idG, 'qa-guards', { timeout: 60000 });
+	report('Local guards (failures are the pass)', execG);
+	// Each guard runs in its own workflow, because the first failure stops the chain.
+	for (const [label, params] of [
+		['reject bad qpy', { resource: 'job', operation: 'submitSampler', backend: BACKEND,
+			circuitFormat: 'qpy', qpyCircuit: 'bm90IGEgcXB5IGZpbGU=', shots: 1 }],
+		['reject qasm2', { resource: 'job', operation: 'submitSampler', backend: BACKEND,
+			circuitFormat: 'qasm3', qasm3: 'OPENQASM 2.0;\nqreg q[1];', shots: 1 }],
+	]) {
+		const path = `qa-guard-${label.replace(/\s+/g, '-')}`;
+		const nodes = [webhook(path), ibm(label, params)];
+		const id = await createWf(`[QA] Guard ${label}`, nodes, chain(nodes.map((n) => n.name)), true);
+		report(`Guard: ${label}`, await runWebhook(id, path, { timeout: 60000 }));
+	}
+
+	// ---- Phase 2d: the noise learner, opt-in because it runs on the QPU and spends quota.
+	// Randomizations multiply shots, so the values here are the smallest that still produce a
+	// result, and Max Cost caps the damage if the backend is slower than expected.
+	if (process.env.QA_NOISE_LEARNER === '1') {
+		console.log('\n[2d] Noise learner (spends QPU quota)...');
+		const nodesN = [
+			webhook('qa-noise'),
+			ibm('circuit build', XCIRC),
+			ibm('submit noise learner', {
+				resource: 'job',
+				operation: 'submitNoiseLearner',
+				backend: BACKEND,
+				circuitFormat: 'qasm3',
+				qasm3: "={{ $('circuit build').item.json.qasm3 }}",
+				maxCost: 120,
+				jobTags: 'qa-noise-learner',
+				noiseLearnerOptions: { maxLayersToLearn: 1, numRandomizations: 4, shotsPerRandomization: 32 },
+			}),
+			ibm('noise results', { resource: 'job', operation: 'getResults',
+				jobId: "={{ $('submit noise learner').item.json.jobId }}", pollInterval: 5, maxWait: 300 }),
+		];
+		const idN = await createWf('[QA] Noise learner', nodesN, chain(nodesN.map((n) => n.name)), true);
+		report('Noise learner', await runWebhook(idN, 'qa-noise', { timeout: 330000 }));
+	} else {
+		console.log('\n[2d] Noise learner skipped (set QA_NOISE_LEARNER=1 to include it)');
+	}
+
+	// ---- Phase 2c: the instance cost limit, opt-in because it writes account configuration.
+	// It reads the current value and writes the same one back, so the instance is unchanged.
+	if (process.env.QA_WRITE_CONFIG === '1') {
+		console.log('\n[2c] Cost limit round trip (writes back the value it read)...');
+		const nodesL = [
+			webhook('qa-costlimit'),
+			ibm('read config', { resource: 'account', operation: 'getConfiguration' }),
+			ibm('write same limit', { resource: 'account', operation: 'setCostLimit',
+				instanceLimit: "={{ $('read config').item.json.instance_limit || 0 }}" }),
+			ibm('verify config', { resource: 'account', operation: 'getConfiguration' }),
+		];
+		const idL = await createWf('[QA] Cost limit round trip', nodesL, chain(nodesL.map((n) => n.name)), true);
+		report('Cost limit round trip', await runWebhook(idL, 'qa-costlimit', { timeout: 60000 }));
+	} else {
+		console.log('\n[2c] Cost limit round trip skipped (set QA_WRITE_CONFIG=1 to include it)');
+	}
+
 	// ---- Phase 3: session lifecycle
 	console.log('\n[3] Session lifecycle...');
 	const nodesE = [
 		webhook('qa-session'),
-		// batch mode: the Open plan forbids "dedicated" sessions (IBM error 1352)
-		ibm('session create', { resource: 'session', operation: 'create', mode: 'batch', sessionBackend: BACKEND, maxTtl: 300 }),
+		// batch mode: the Open plan forbids "dedicated" sessions (IBM error 1352). The parameter is
+		// sessionMode on typeVersion 2; a node still on version 1 would read it as `mode`.
+		ibm('session create', { resource: 'session', operation: 'create', sessionMode: 'batch', sessionBackend: BACKEND, maxTtl: 300 }),
 		ibm('session get', { resource: 'session', operation: 'get', sessionId: "={{ $('session create').item.json.sessionId }}" }),
 		ibm('session setAccepting', { resource: 'session', operation: 'setAccepting', sessionId: "={{ $('session create').item.json.sessionId }}", acceptingJobs: false }),
 		ibm('session close', { resource: 'session', operation: 'close', sessionId: "={{ $('session create').item.json.sessionId }}" }),
@@ -181,8 +261,9 @@ async function main() {
 	const nodesC = [
 		webhook('qa-cancel'),
 		ibm('circuit build', XCIRC),
+		// maxCost caps the runtime seconds IBM may spend on this job before cancelling it.
 		ibm('submit sampler', { resource: 'job', operation: 'submitSampler', backend: BACKEND,
-			qasm3: "={{ $('circuit build').item.json.qasm3 }}", shots: 256 }),
+			circuitFormat: 'qasm3', qasm3: "={{ $('circuit build').item.json.qasm3 }}", shots: 256, maxCost: 60 }),
 		ibm('job getStatus', { resource: 'job', operation: 'getStatus', jobId: "={{ $('submit sampler').item.json.jobId }}" }),
 		ibm('job cancel', { resource: 'job', operation: 'cancel', jobId: "={{ $('submit sampler').item.json.jobId }}" }),
 		ibm('job list', { resource: 'job', operation: 'list', limit: 10 }),

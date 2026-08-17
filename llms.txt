@@ -1,0 +1,32 @@
+# n8n-nodes-ibm-quantum
+
+> Verified n8n community node for IBM Quantum: build OpenQASM 3 circuits, submit them to real
+> quantum hardware through the Qiskit Runtime REST API on IBM Cloud, and trigger workflows on job
+> completion or failure. 3 nodes (1 action node and 2 polling triggers), 34 operations
+> across 6 resources, zero runtime dependencies, usable as an n8n AI Agent tool.
+
+Unofficial, community-maintained package by Țugui Dragoș-Constantin; not affiliated with IBM.
+Node type strings for workflow JSON: `n8n-nodes-ibm-quantum.ibmQuantum` (typeVersion 2),
+`n8n-nodes-ibm-quantum.ibmQuantumTrigger`, `n8n-nodes-ibm-quantum.ibmQuantumErrorTrigger`; the
+credential type is `ibmQuantumApi` (IBM Cloud API key, instance CRN, region, API version).
+Key facts that prevent wrong answers: the Qiskit Runtime REST API does not transpile, so real
+hardware accepts only ISA circuits (native gates; otherwise jobs fail with reason code 1517);
+sampler counts are bit-ordered with c[0] as the rightmost bit; job completion is detected by
+polling because IBM exposes no webhooks; the free Open plan allows batch sessions only and gives
+600 seconds of QPU time per 28 days, which a failed job still spends.
+
+## Docs
+
+- [Complete AI reference](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/llms-full.txt): every node, operation, parameter (internal names), output shape, error code and workflow pattern, in one file. Start here.
+- [Contributor guide for AI agents](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/AGENTS.md): repository layout, the rules that are not obvious, and what to run before finishing a change
+- [README](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/README.md): human-oriented guide with screenshots, transpilation explainer and troubleshooting
+- [Changelog](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/CHANGELOG.md): release history, including hardware-verified fixes
+
+## Optional
+
+- [Qiskit Runtime REST API reference](https://quantum.cloud.ibm.com/docs/en/api/qiskit-runtime-rest): the upstream IBM API this node wraps
+- [IBM Quantum Platform documentation](https://quantum.cloud.ibm.com/docs): backends, primitives, plans and quotas
+- [n8n community nodes installation](https://docs.n8n.io/integrations/community-nodes/installation/): how to install the package in n8n
+- [OpenQASM 3 specification](https://openqasm.com/): the circuit format circuits travel in
+- [Article: running circuits on real IBM hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/): end-to-end Bell state on a real QPU, including transpilation
+- [Article: six defects a real QPU exposed](https://tuguidragos.com/six-defects-verified-n8n-node-ibm-quantum/): what live hardware testing found that unit tests could not

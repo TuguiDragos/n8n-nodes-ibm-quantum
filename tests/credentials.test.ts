@@ -2,7 +2,7 @@ import type { ICredentialDataDecryptedObject, IHttpRequestHelper } from 'n8n-wor
 import { describe, expect, it } from 'vitest';
 
 import { IbmQuantumApi } from '../credentials/IbmQuantumApi.credentials';
-import { REGION_HOSTS } from '../nodes/IbmQuantum/transport';
+import { CURRENT_API_VERSION, REGION_HOSTS } from '../nodes/IbmQuantum/transport';
 
 const cred = new IbmQuantumApi();
 
@@ -17,6 +17,14 @@ describe('credential region/host sync (MAINT-01)', () => {
 		for (const host of Object.values(REGION_HOSTS)) {
 			expect(baseURL).toContain(host);
 		}
+	});
+
+	// The credential ships the version as a literal default and the guard compares against its own
+	// constant. Without this, a new IBM version could be adopted in one place and warn in the other.
+	it('offers the version the guard treats as current', () => {
+		const apiVersion = cred.properties.find((p) => p.name === 'apiVersion');
+		expect(apiVersion?.default).toBe(CURRENT_API_VERSION);
+		expect(apiVersion?.placeholder).toBe(CURRENT_API_VERSION);
 	});
 });
 

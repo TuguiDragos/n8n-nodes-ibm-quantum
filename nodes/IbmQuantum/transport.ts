@@ -1,5 +1,6 @@
 import {
 	NodeApiError,
+	NodeOperationError,
 	type IDataObject,
 	type IExecuteFunctions,
 	type IHttpRequestMethods,
@@ -27,6 +28,64 @@ export const REGION_HOSTS: Record<string, string> = {
 export function getBaseUrl(region: string): string {
 	const host = REGION_HOSTS[region] ?? REGION_HOSTS['us-east'];
 	return `${host}/api/v1`;
+}
+
+// The oldest IBM-API-Version that is not deprecated. Every earlier version still answers today but
+// carries a published 2027 sunset date.
+export const CURRENT_API_VERSION = '2026-04-15';
+
+export interface ApiVersionProblem {
+	fatal: boolean;
+	message: string;
+}
+
+// A malformed version is fatal, because it reaches IBM as a header it cannot parse and the error
+// that comes back names neither the field nor the cause. A deprecated but well-formed date only
+// warns: those versions still answer, so refusing them would break a working credential years
+// before IBM stops accepting it.
+export function checkApiVersion(value: unknown): ApiVersionProblem | null {
+	const version = typeof value === 'string' ? value.trim() : '';
+	if (!version) {
+		return {
+			fatal: true,
+			message: `The credential has no API Version. Set it to ${CURRENT_API_VERSION}.`,
+		};
+	}
+	const date = /^\d{4}-\d{2}-\d{2}$/.test(version) ? new Date(`${version}T00:00:00Z`) : null;
+	// Compare the round trip, so a date the pattern accepts but the calendar does not (2026-02-31,
+	// which rolls forward to March) is rejected rather than silently shifted.
+	const isRealDate =
+		date !== null && !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === version;
+	if (!isRealDate) {
+		return {
+			fatal: true,
+			message: `The credential's API Version "${version}" is not a YYYY-MM-DD date. Use ${CURRENT_API_VERSION}.`,
+		};
+	}
+	if (version < CURRENT_API_VERSION) {
+		return {
+			fatal: false,
+			message: `The credential's API Version ${version} is deprecated and IBM has scheduled it for removal. Update it to ${CURRENT_API_VERSION}.`,
+		};
+	}
+	return null;
+}
+
+// A catch binding is typed `unknown`, so reading a message needs both arms even where only an
+// Error is ever thrown.
+export function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+// Preserve the context-rich errors raised downstream and wrap only raw ones, so a failure always
+// reaches the user as a node error rather than a bare exception.
+export function asNodeError(
+	node: INode,
+	error: unknown,
+	itemIndex?: number,
+): NodeApiError | NodeOperationError {
+	if (error instanceof NodeApiError || error instanceof NodeOperationError) return error;
+	return new NodeApiError(node, error as JsonObject, itemIndex === undefined ? {} : { itemIndex });
 }
 
 // Guard against a hung connection stalling the execution.

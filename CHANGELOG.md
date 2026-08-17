@@ -2,10 +2,157 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.4.0 (2026-08-17)
+
+A verification fix, 10 new operations across a 6th resource, and documentation written for machines
+as well as people. The node goes from 24 to 34 operations. Everything here was traced end to end:
+each change was followed through every caller, and the suite grew from 185 tests to 264 at 100%
+statement, branch, function and line coverage.
+
+### Fixed
+
+- **Both triggers drop `usableAsTool`.** `@n8n/eslint-plugin-community-nodes` 0.29.0 (2026-08-11)
+  reversed the `node-usable-as-tool` rule for trigger nodes: the property the 0.3.3 verification
+  pass was required to add is now an error on triggers, so the published 0.3.3 fails
+  `npx @n8n/scan-community-package` with exactly 2 errors. The tool variants n8n generated for
+  the triggers could never run anyway (a polling trigger implements `poll()`, not `execute()`);
+  removing the property also removes them from the AI Agent tool picker. The local lint now runs
+  the same plugin version the scanner pins and passes with zero errors.
+
+- **An unknown resource no longer runs a job operation.** The dispatcher ended in an `else` that
+  sent anything unrecognised to `handleJob`, so a resource sharing an operation name with the job
+  resource would have quietly returned the wrong collection. Each resource is now named explicitly
+  and an unknown one raises `Unsupported resource`, matching the guard 0.2.2 added for operations.
+  A new test walks every operation the UI advertises and fails if one is not routed.
+
+### Added
+
+- **Node version 2, renaming the session Mode parameter to `sessionMode`.** n8n's MCP server treats
+  a parameter literally named `mode` as a node discriminator and drops it from the type definitions
+  it hands to AI workflow builders, so an agent building a workflow through the MCP could not choose
+  between a batch and a dedicated session. *Verified against the live MCP:* `get_node_types` for
+  session/create returned only `sessionBackend` and `maxTtl`. Version 1 still loads and still reads
+  `mode`, gated by `displayOptions` on `@version`, so existing workflows are untouched; both paths
+  are covered by tests, including one proving a version 2 node ignores a stale `mode` value.
+
+- **Job cost cap.** Submit takes **Max Cost (Seconds)**, sent as `cost`, after which IBM cancels the
+  job. Zero, the default, omits the field. The Open plan's whole allowance is 600 seconds per 28
+  days, and a failed job spends it too, so a cap is the cheapest protection available. Clamped to
+  the 10800 IBM permits.
+
+- **QPY circuits.** Submit gains **Circuit Format**, choosing between OpenQASM 3 and base64 QPY,
+  which preserves circuits OpenQASM 3 cannot express. The local pre-submit guard is preserved rather
+  than relaxed: a QPY payload is checked for the `UUlTS0lU` prefix, the base64 encoding of the QPY
+  magic bytes, exactly as an OpenQASM 3 circuit is checked for its version header. A workflow saved
+  before this parameter existed stores no value for it and still submits OpenQASM 3.
+
+- **Workload resource,** wrapping `GET /v1/workloads`: jobs, sessions and batches in one listing,
+  with free-text search over IDs and tags, a mode filter, status multi-select, and cursor paging.
+  Capped at the 50 per call the endpoint allows, and sorted newest first so it matches Job List,
+  which the API on its own would not.
+
+- **Usage analytics and the instance cost limit.** Account gains Get Usage Analytics, Get Usage
+  Analytics Grouped (by backend, instance, plan, user or subscription), Get Usage Analytics Grouped
+  by Date, Get Usage Analytics Filters, and Set Cost Limit, which writes the instance-wide ceiling
+  and clears it with an explicit null. The read paths consume no QPU time, so a scheduled spend
+  report costs nothing.
+
+- **Backend Get Defaults,** wrapping `GET /v1/backends/{id}/defaults`.
+
+- **Submit to Noise Learner.** The third program on `POST /v1/jobs`, characterising the
+  Pauli-Lindblad error channels on the entangling layers a circuit uses. It is included where
+  Executor, NoiseLearnerV3 and Calibrator are not, for one reason: the version 2 noise learner
+  accepts a plain QASM string, while all 3 of the others require circuits encoded as base64
+  QPY, which cannot be produced without Qiskit. Its options object is declared
+  `additionalProperties: false` upstream, so the Sampler and Estimator toggles are deliberately kept
+  out of it and a test pins that they never leak in.
+
+- **Account Get API Versions,** wrapping `GET /v1/versions`, so the versions IBM currently serves
+  can be read from a workflow instead of from the docs. *Verified live:* the endpoint answers
+  unauthenticated and reports `2026-04-15` as the only version with status `live`.
+
+- **Job List Tags,** wrapping `GET /v1/tags`. The API requires both `type` and `search`, so the node
+  sends `type=job` and an empty search when none is given, rather than failing on a missing
+  parameter.
+
+- **Log Level on every submit,** sent as `log_level` and readable afterwards with Get Logs.
+
+- **A guard on the credential's API Version.** A value that is not a real YYYY-MM-DD date, including
+  an impossible one such as 2026-02-31, now fails locally with a message naming the field, instead
+  of reaching IBM as an unparseable header whose error names neither. A well-formed but deprecated
+  date is accepted and logged as a warning, because those versions still answer and refusing them
+  would break a working credential years before IBM stops accepting it. *Verified live:*
+  `GET /v1/versions` lists `2026-04-15` as the only version not deprecated, with 2027 sunsets on
+  every earlier one. The warning is raised on the action node only; a trigger polls on a schedule
+  and would repeat it indefinitely.
+
+- **A tool description written for the model.** The action node ships
+  `usableAsTool.replacements.description`, telling an agent which calls are safe unprompted and why
+  it cannot invent a circuit for real hardware. Two node hints now appear in the editor as well: one
+  warning that Get Results holds the execution open, one that a non-native circuit fails with reason
+  code 1517 and still spends quota.
+
+- **Codex metadata.** Each node ships a `.node.json` giving it a category in the picker, search
+  aliases such as Qiskit and QPU, and documentation links. The build copies them into `dist`
+  alongside the icons, which is why `copy-icons.mjs` is now `copy-assets.mjs`.
+
+- **AI-readable documentation, following the [llms.txt](https://llmstxt.org) convention.**
+  `llms.txt` is the index; `llms-full.txt` is a complete machine-oriented reference generated from
+  the source: node type strings, every operation's internal parameter names and defaults, output
+  shapes, the gate emission table, ISA and transpilation guidance, error codes, limits, and a
+  runnable example workflow JSON (parse-checked in CI terms by a test). `AGENTS.md` covers the same
+  ground for agents changing the code rather than using it. All three ship in the npm tarball.
+
+- **Guidance to run the verification scan on a schedule,** not only before a release. The ruleset
+  moves independently of this repository and has now broken a compliant release once, so a package
+  can go from passing to failing while sitting untouched on npm.
+
+### Changed
+
+- **Documentation catches up with IBM.** The service is now called IBM Quantum Compute Service (a
+  rename only; endpoints are unchanged). The Open plan's allowance is documented as 600 seconds per
+  rolling 28 days, the plan lineup as Open, Pay-As-You-Go, Flex, Premium and On-Prem. The native
+  gate recipe is now scoped to Heron: **Nighthawk** processors (`ibm_miami`, `ibm_berlin`) run
+  `cz, id, rz, sx, x` with no fractional `rx`, so the transpiler-free Bell state does not run there.
+  IBM's own limits are documented: 5 job submissions per minute, 50 MB per payload, three hours
+  per job, ten million executions per Sampler job.
+
+- **`parseTagList` is now `parseCsvList`,** since it also splits backends, plans, instances and user
+  IDs for the analytics filters. Internal only.
+
+- **Toolchain:** `n8n-workflow` 2.34.3, the current `stable` tag;
+  `@n8n/eslint-plugin-community-nodes` 0.29.0, the version the scanner pins; `@types/node` 26.2.0;
+  `typescript-eslint` 8.67.0. `package.json` declares `n8n.strict`. `eslint` stays pinned at 9.29.0
+  and `eslint-plugin-n8n-nodes-base` stays on 1.x: a 2.0.0 exists, but the scanner still depends on
+  `^1.16.7`, and linting against a ruleset the scanner does not run would prove nothing.
+
+### Notes
+
+- **Executor, NoiseLearnerV3 and Calibrator stay out,** and so does `GET /v1/accounts/{id}`. The
+  3 programs each require circuits encoded as base64 QPY, which cannot be produced without
+  Qiskit and so cannot be reached by a package whose whole premise is that you do not need it. The
+  account endpoint is unreachable for a simpler reason: nothing else in this API returns an account
+  id, so a workflow has no way to obtain one. Both gaps are documented in `llms-full.txt`.
+
+- **Coverage is now a flat 100.** Getting there removed code rather than adding assertions: a `?? []`
+  in `results.ts` that a preceding guard had already made unreachable is gone, and the two
+  copy-pasted narrowing expressions (`error instanceof Error ? ... : String(error)` in 3 places,
+  and the NodeApiError wrap in two) are now single tested helpers, `errorMessage` and `asNodeError`
+  in `transport.ts`. `parseSamplerPub` is exported so its no-register guard is a tested path instead
+  of a theoretical one. The thresholds are raised from 100/99/100/97 to 100 across the board, so an
+  untested line now fails the build.
+
+- **Three `npm audit` findings remain, and cannot be fixed here.** All three are the same
+  transitive `nanoid` advisory, reached through `n8n-workflow` and `@n8n/utils`, which pins
+  `nanoid` at exactly 3.3.8 (the fix is 3.3.18). An `overrides` entry would resolve it and was
+  tried, but community node packages are forbidden from declaring one, and the lint rule says so
+  explicitly. The published package has no runtime dependencies at all, so nothing reaches a user;
+  the finding is confined to the development tree and waits on n8n.
+
 ## 0.3.3 (2026-08-02)
 
 A verification and correctness release. The package had stopped passing the official n8n scan, and
-three defects only a real quantum processor could expose were sitting in the shipped code. Every
+3 defects only a real quantum processor could expose were sitting in the shipped code. Every
 fix below was confirmed against live IBM hardware, not against a mock: roughly 34 jobs across
 `ibm_kingston`, `ibm_marrakesh` and `ibm_fez`, consuming 118 of the Open plan's 600 monthly seconds.
 Where a claim is physical, the expected value is stated next to the measured one.
@@ -56,7 +203,7 @@ Where a claim is physical, the expected value is stated next to the measured one
 
 - **The package failed `npx @n8n/scan-community-package`.** Scanner 0.30.0 verifies npm provenance,
   then fetches the source the attestation points at and lints it with `eslint-plugin-n8n-nodes-base`
-  as well as the community-nodes plugin. Ten errors were reported that `npm run lint` never ran:
+  as well as the community-nodes plugin. 10 errors were reported that `npm run lint` never ran:
   both trigger display names, the triggers' `limit` parameter, and four operation actions that were
   not sentence case. *Before:* `passed=false, errors=10`. *After:* `passed=true, errors=0`, on both
   the source leg and the published-artifact leg.

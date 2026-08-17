@@ -1,0 +1,22 @@
+{
+	"node": "n8n-nodes-ibm-quantum.ibmQuantum",
+	"nodeVersion": "2.0",
+	"codexVersion": "1.0",
+	"categories": ["Development", "Analytics"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#credentials"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme"
+			},
+			{
+				"url": "https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/llms-full.txt"
+			}
+		]
+	},
+	"alias": ["Quantum", "Qiskit", "QPU", "OpenQASM", "IBM", "Circuit", "Sampler", "Estimator"]
+}

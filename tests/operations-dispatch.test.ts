@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { handleAccount, handleJob, handleSession } from '../nodes/IbmQuantum/operations';
+import {
+	handleAccount,
+	handleJob,
+	handleSession,
+	handleWorkload,
+} from '../nodes/IbmQuantum/operations';
 import { makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 const base = TEST_CTX.baseUrl;
@@ -138,6 +143,116 @@ describe('handleJob dispatch (TEST-12)', () => {
 	});
 });
 
+describe('session mode across node versions', () => {
+	it('reads sessionMode on version 2', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			typeVersion: 2,
+			params: { sessionMode: 'dedicated', sessionBackend: 'ibm_fez', maxTtl: 0 },
+			http: () => ({ id: 'sess-v2' }),
+		});
+		await handleSession.call(ctx, TEST_CTX, 'create', 0);
+		expect(requests[0].body).toEqual({ mode: 'dedicated', backend: 'ibm_fez' });
+	});
+
+	it('still reads mode on a version 1 workflow, which stores the value under that name', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			typeVersion: 1,
+			params: { mode: 'dedicated', sessionBackend: 'ibm_fez', maxTtl: 0 },
+			http: () => ({ id: 'sess-v1' }),
+		});
+		await handleSession.call(ctx, TEST_CTX, 'create', 0);
+		expect(requests[0].body).toEqual({ mode: 'dedicated', backend: 'ibm_fez' });
+	});
+
+	it('ignores the other version’s parameter rather than mixing the two', async () => {
+		// A version 2 node carrying a stale `mode` value must not pick it up, or a workflow migrated
+		// by hand would silently keep running the old choice.
+		const { ctx, requests } = makeExecuteContext({
+			typeVersion: 2,
+			params: { mode: 'dedicated', sessionBackend: 'ibm_fez', maxTtl: 0 },
+			http: () => ({ id: 'sess-mixed' }),
+		});
+		await handleSession.call(ctx, TEST_CTX, 'create', 0);
+		expect(requests[0].body).toEqual({ mode: 'batch', backend: 'ibm_fez' });
+	});
+});
+
+describe('job tag listing', () => {
+	it('always sends the type the API requires, and passes the search through', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { tagSearch: '  experiment  ' },
+			http: () => ({}),
+		});
+		await handleJob.call(ctx, TEST_CTX, 'listTags', 0);
+		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/tags` });
+		expect(requests[0].qs).toEqual({ type: 'job', search: 'experiment' });
+	});
+
+	it('sends an empty search rather than omitting a parameter the API requires', async () => {
+		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+		await handleJob.call(ctx, TEST_CTX, 'listTags', 0);
+		expect(requests[0].qs).toEqual({ type: 'job', search: '' });
+	});
+});
+
+describe('handleWorkload listing', () => {
+	it('asks for newest first and the capped limit by default', async () => {
+		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+		await handleWorkload.call(ctx, TEST_CTX, 'list', 0);
+		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/workloads` });
+		expect(requests[0].qs).toEqual({ limit: 50, sort: '-createdAt' });
+	});
+
+	it('caps the limit at the 50 this endpoint allows, well below the jobs listing', async () => {
+		const { ctx, requests } = makeExecuteContext({ params: { limit: 200 }, http: () => ({}) });
+		await handleWorkload.call(ctx, TEST_CTX, 'list', 0);
+		expect((requests[0].qs as Record<string, unknown>).limit).toBe(50);
+	});
+
+	it('maps every filter to its API name, including the renamed mode', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				limit: 25,
+				workloadFilters: {
+					backend: 'ibm_kingston',
+					createdAfter: '2026-08-01T00:00:00Z',
+					createdBefore: '2026-08-17T00:00:00Z',
+					next: 'cursor-next',
+					previous: 'cursor-prev',
+					search: 'bell',
+					workloadMode: 'session',
+					status: ['completed', 'failed'],
+					tags: 'experiment-7, vqe',
+					sort: 'createdAt',
+				},
+			},
+			http: () => ({}),
+		});
+		await handleWorkload.call(ctx, TEST_CTX, 'list', 0);
+		expect(requests[0].qs).toEqual({
+			limit: 25,
+			backend: 'ibm_kingston',
+			created_after: '2026-08-01T00:00:00Z',
+			created_before: '2026-08-17T00:00:00Z',
+			next: 'cursor-next',
+			previous: 'cursor-prev',
+			search: 'bell',
+			mode: 'session',
+			status: ['completed', 'failed'],
+			tags: ['experiment-7', 'vqe'],
+			sort: 'createdAt',
+		});
+	});
+
+	it('rejects an unknown workload operation', async () => {
+		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+		await expect(handleWorkload.call(ctx, TEST_CTX, 'delete', 0)).rejects.toThrow(
+			/Unsupported workload operation: delete/,
+		);
+		expect(requests).toHaveLength(0);
+	});
+});
+
 describe('handleAccount endpoints (TEST-12)', () => {
 	it('maps getUsage to /instances/usage (plural)', async () => {
 		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
@@ -155,6 +270,98 @@ describe('handleAccount endpoints (TEST-12)', () => {
 		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
 		await handleAccount.call(ctx, TEST_CTX, 'getConfiguration');
 		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/instances/configuration` });
+	});
+
+	it('sends an empty query for usage analytics when no filter is set', async () => {
+		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalytics', 0);
+		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/analytics/usage` });
+		expect(requests[0].qs).toEqual({});
+	});
+
+	it('splits list filters into arrays and keeps simulators off the query unless disabled', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				analyticsFilters: {
+					backend: 'ibm_kingston, ibm_fez',
+					instance: 'inst-a',
+					plan: 'open',
+					subscriptionId: 'sub-1, sub-2',
+					userId: 'user-9',
+					intervalStart: '2026-08-01T00:00:00Z',
+					intervalEnd: '2026-08-17T00:00:00Z',
+					simulators: false,
+				},
+			},
+			http: () => ({}),
+		});
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalytics', 0);
+		expect(requests[0].qs).toEqual({
+			backend: ['ibm_kingston', 'ibm_fez'],
+			instance: ['inst-a'],
+			plan: ['open'],
+			subscription_id: ['sub-1', 'sub-2'],
+			user_id: ['user-9'],
+			interval_start: '2026-08-01T00:00:00Z',
+			interval_end: '2026-08-17T00:00:00Z',
+			simulators: false,
+		});
+	});
+
+	it('keeps simulators out of the query when left on, matching the API default', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { analyticsFilters: { simulators: true } },
+			http: () => ({}),
+		});
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalytics', 0);
+		expect(requests[0].qs).toEqual({});
+	});
+
+	it('passes the chosen key to the grouped endpoint', async () => {
+		const { ctx, requests } = makeExecuteContext({ params: { groupBy: 'plan' }, http: () => ({}) });
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalyticsGrouped', 0);
+		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/analytics/usage_grouped` });
+		expect((requests[0].qs as Record<string, unknown>).group_by).toBe('plan');
+	});
+
+	it('forces group_by to instance on the by-date endpoint, the only value it accepts', async () => {
+		const { ctx, requests } = makeExecuteContext({ params: { groupBy: 'plan' }, http: () => ({}) });
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalyticsByDate', 0);
+		expect(requests[0].url).toBe(`${base}/analytics/usage_grouped_by_date`);
+		expect((requests[0].qs as Record<string, unknown>).group_by).toBe('instance');
+	});
+
+	it('maps getApiVersions to /versions', async () => {
+		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+		await handleAccount.call(ctx, TEST_CTX, 'getApiVersions', 0);
+		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/versions` });
+	});
+
+	it('requests the analytics filter values without a query', async () => {
+		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalyticsFilters', 0);
+		expect(requests[0]).toMatchObject({ method: 'GET', url: `${base}/analytics/filters` });
+		expect(requests[0].qs).toBeUndefined();
+	});
+
+	it('writes the cost limit, and sends null to clear it', async () => {
+		const set = makeExecuteContext({ params: { instanceLimit: 600 }, http: () => ({}) });
+		const result = (await handleAccount.call(set.ctx, TEST_CTX, 'setCostLimit', 0)) as Record<
+			string,
+			unknown
+		>;
+		expect(set.requests[0]).toMatchObject({
+			method: 'PUT',
+			url: `${base}/instances/configuration`,
+		});
+		expect(set.requests[0].body).toEqual({ instance_limit: 600 });
+		expect(result).toEqual({ instanceLimit: 600 });
+
+		for (const value of [0, -5, 'nonsense']) {
+			const cleared = makeExecuteContext({ params: { instanceLimit: value }, http: () => ({}) });
+			await handleAccount.call(cleared.ctx, TEST_CTX, 'setCostLimit', 0);
+			expect(cleared.requests[0].body).toEqual({ instance_limit: null });
+		}
 	});
 });
 

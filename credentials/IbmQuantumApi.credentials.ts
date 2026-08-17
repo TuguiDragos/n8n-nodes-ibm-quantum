@@ -77,7 +77,7 @@ export class IbmQuantumApi implements ICredentialType {
 			default: '2026-04-15',
 			placeholder: '2026-04-15',
 			description:
-				'Date (YYYY-MM-DD) that selects the IBM API response format. Leave the default unless IBM docs require a newer version.',
+				'Date (YYYY-MM-DD) that selects the IBM API response format. 2026-04-15 is the only version IBM does not list as deprecated; earlier dates still answer but are scheduled for removal during 2027. Change this only when IBM publishes a newer version.',
 		},
 		// Filled in by preAuthentication; hidden from the form. The expirable flag is what
 		// tells n8n to run preAuthentication at all. Without it n8n skips the token exchange,
