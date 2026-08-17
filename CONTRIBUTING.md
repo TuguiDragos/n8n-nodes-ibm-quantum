@@ -30,7 +30,7 @@ npm install --ignore-scripts
 
 CI runs `lint`, `build` and `test:coverage` on Node 22 and 24, and coverage is a gate rather than a report: the thresholds in `vitest.config.mts` are 100 for statements, branches, functions and lines, so a new line without a test fails the build. Please make sure all 3 pass before opening a pull request.
 
-`scan` inspects the package already published on npm, so it cannot run on a pull request. Run it periodically instead, because the n8n verification ruleset changes independently of this repository and has already broken a release that was compliant when it shipped.
+`scan` inspects the package already published on npm, so it cannot run on a pull request. It runs instead on a monthly schedule in `scan.yml`, because the n8n verification ruleset changes independently of this repository and has already broken a release that was compliant when it shipped.
 
 ## Style
 

@@ -103,9 +103,9 @@ statement, branch, function and line coverage.
   runnable example workflow JSON (parse-checked in CI terms by a test). `AGENTS.md` covers the same
   ground for agents changing the code rather than using it. All three ship in the npm tarball.
 
-- **Guidance to run the verification scan on a schedule,** not only before a release. The ruleset
-  moves independently of this repository and has now broken a compliant release once, so a package
-  can go from passing to failing while sitting untouched on npm.
+- **A monthly verification scan.** `scan.yml` runs the official scanner on a schedule and on demand.
+  The ruleset moves independently of this repository and has now broken a compliant release once;
+  this turns the next occurrence into a notification instead of a discovery at publish time.
 
 ### Changed
 

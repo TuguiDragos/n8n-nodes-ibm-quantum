@@ -1,0 +1,29 @@
+name: Verification scan
+
+# The n8n verification ruleset moves independently of this repository, and a rule change has
+# already broken a published release that was compliant when it shipped: 0.29.0 of the community
+# nodes plugin reversed node-usable-as-tool for triggers, and 0.3.3 started failing the scan
+# without a single commit here. A scheduled run turns that from a surprise into a notification.
+on:
+  schedule:
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      # Lints the working tree against whatever ruleset is current today.
+      - run: npm run lint
+      # Then the official scanner, against the published package: provenance, the source the
+      # attestation points at, and the same lint rules the verification team runs.
+      - run: npx --yes @n8n/scan-community-package@latest n8n-nodes-ibm-quantum

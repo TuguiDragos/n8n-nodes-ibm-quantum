@@ -441,7 +441,7 @@ npm run scan     # the official n8n community package scanner
 
 Lint, build and coverage run in CI on Node 22 and 24. Coverage is a gate rather than a report: the thresholds are 100 for statements, branches, functions and lines, so an untested line fails the build. `isolated-vm`, a native transitive dev dependency pulled in by `n8n-workflow`, is not needed to lint, build or test, which is why install scripts are skipped. The build step runs `scripts/copy-assets.mjs` after `tsc`, because TypeScript compiles neither the icons nor the codex `.node.json` files.
 
-`npm run scan` is worth running on a schedule of its own, not only before a release. The n8n verification ruleset changes independently of this repository and has already broken a release that was compliant when it shipped, so a package can go from passing to failing while sitting untouched on npm.
+The scan runs on its own schedule too. The n8n verification ruleset changes independently of this repository, and has already broken a release that was compliant when it shipped, so `scan.yml` runs the official scanner monthly and on demand rather than waiting for the next publish to discover it.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and the [Code of Conduct](CODE_OF_CONDUCT.md) for the full workflow, [AGENTS.md](AGENTS.md) if you are pointing an AI coding agent at this repository, [SECURITY.md](SECURITY.md) for reporting a vulnerability, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
