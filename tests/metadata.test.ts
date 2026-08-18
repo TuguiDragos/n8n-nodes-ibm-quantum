@@ -1,34 +1,40 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+// Everything here is read through a relative import rather than the filesystem. The n8n
+// verification scanner lints this directory too, and its no-restricted-imports rule allows only
+// relative paths, devDependencies and a short allowlist, so `node:fs` would fail the scan.
+import changelog from '../CHANGELOG.md?raw';
 import { IbmQuantumApi } from '../credentials/IbmQuantumApi.credentials';
+import llmsIndex from '../llms.txt?raw';
 import { nodeProperties } from '../nodes/IbmQuantum/descriptions';
 import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
+import codexAction from '../nodes/IbmQuantum/IbmQuantum.node.json';
 import { IbmQuantumErrorTrigger } from '../nodes/IbmQuantum/IbmQuantumErrorTrigger.node';
+import codexErrorTrigger from '../nodes/IbmQuantum/IbmQuantumErrorTrigger.node.json';
 import { IbmQuantumTrigger } from '../nodes/IbmQuantum/IbmQuantumTrigger.node';
+import codexTrigger from '../nodes/IbmQuantum/IbmQuantumTrigger.node.json';
+import PACKAGE from '../package.json';
+import readme from '../README.md?raw';
 
-const PACKAGE = JSON.parse(readFileSync('package.json', 'utf8')) as {
-	name: string;
-	n8n: { nodes: string[]; credentials: string[] };
-};
-
-const NODES = [new IbmQuantum(), new IbmQuantumTrigger(), new IbmQuantumErrorTrigger()];
+const NODES = [
+	[new IbmQuantum(), codexAction],
+	[new IbmQuantumTrigger(), codexTrigger],
+	[new IbmQuantumErrorTrigger(), codexErrorTrigger],
+] as const;
 
 describe('package registration', () => {
 	it('registers every node class it ships, and the credential', () => {
-		for (const node of NODES) {
+		for (const [node] of NODES) {
 			const file = `dist/nodes/IbmQuantum/${node.constructor.name}.node.js`;
 			expect(PACKAGE.n8n.nodes).toContain(file);
 		}
 		expect(PACKAGE.n8n.nodes).toHaveLength(NODES.length);
-		expect(PACKAGE.n8n.credentials).toContain(
-			'dist/credentials/IbmQuantumApi.credentials.js',
-		);
+		expect(PACKAGE.n8n.credentials).toContain('dist/credentials/IbmQuantumApi.credentials.js');
 	});
 
 	it('names the credential the nodes ask for', () => {
 		const credentialName = new IbmQuantumApi().name;
-		for (const node of NODES) {
+		for (const [node] of NODES) {
 			expect(node.description.credentials?.[0].name).toBe(credentialName);
 		}
 	});
@@ -37,12 +43,9 @@ describe('package registration', () => {
 describe('codex files', () => {
 	// The build copies these into dist; if one drifts from its node name n8n silently ignores it,
 	// so the picker category, search aliases and docs links disappear without any error.
-	it.each(NODES.map((node) => [node.constructor.name, node] as const))(
+	it.each(NODES.map(([node, codex]) => [node.constructor.name, node, codex] as const))(
 		'%s has a codex naming its own node type',
-		(className, node) => {
-			const codex = JSON.parse(
-				readFileSync(`nodes/IbmQuantum/${className}.node.json`, 'utf8'),
-			) as { node: string; categories: string[]; alias: string[]; resources: unknown };
+		(_className, node, codex) => {
 			expect(codex.node).toBe(`${PACKAGE.name}.${node.description.name}`);
 			expect(codex.categories.length).toBeGreaterThan(0);
 			expect(codex.alias.length).toBeGreaterThan(0);
@@ -70,11 +73,9 @@ describe('documented surface', () => {
 
 		// The same figure is written out in three places by hand. Pin all of them, because a count
 		// that drifts in prose is the kind of error no other test would ever catch.
-		expect(readFileSync('llms.txt', 'utf8')).toContain(`${total} operations`);
-		expect(readFileSync('README.md', 'utf8')).toContain(
-			`${total} operations across ${Object.keys(EXPECTED).length} resources`,
-		);
-		expect(readFileSync('CHANGELOG.md', 'utf8')).toContain(`${total} operations`);
+		expect(llmsIndex).toContain(`${total} operations`);
+		expect(readme).toContain(`${total} operations across ${Object.keys(EXPECTED).length} resources`);
+		expect(changelog).toContain(`${total} operations`);
 	});
 });
 
