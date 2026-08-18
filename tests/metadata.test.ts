@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 // relative paths, devDependencies and a short allowlist, so `node:fs` would fail the scan.
 import changelog from '../CHANGELOG.md?raw';
 import { IbmQuantumApi } from '../credentials/IbmQuantumApi.credentials';
+import llmsFull from '../llms-full.txt?raw';
 import llmsIndex from '../llms.txt?raw';
 import { nodeProperties } from '../nodes/IbmQuantum/descriptions';
 import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
@@ -76,6 +77,31 @@ describe('documented surface', () => {
 		expect(llmsIndex).toContain(`${total} operations`);
 		expect(readme).toContain(`${total} operations across ${Object.keys(EXPECTED).length} resources`);
 		expect(changelog).toContain(`${total} operations`);
+	});
+});
+
+describe('the example workflow in llms-full.txt', () => {
+	// The fenced JSON is written to be imported into n8n verbatim, so it must stay parseable and
+	// internally wired: a stale node name inside connections would import as a broken workflow,
+	// and an AI assistant copying it would ship that breakage onward.
+	it('parses, wires every connection to a real node, and uses the current node version', () => {
+		const fenced = llmsFull.match(/```json\n([\s\S]*?)```/);
+		expect(fenced).not.toBeNull();
+		const workflow = JSON.parse((fenced as RegExpMatchArray)[1]) as {
+			nodes: Array<{ name: string; type: string; typeVersion: number }>;
+			connections: Record<string, { main: Array<Array<{ node: string }>> }>;
+		};
+		const names = workflow.nodes.map((node) => node.name);
+		expect(names.length).toBeGreaterThan(0);
+		for (const [source, outputs] of Object.entries(workflow.connections)) {
+			expect(names).toContain(source);
+			for (const port of outputs.main) {
+				for (const target of port) expect(names).toContain(target.node);
+			}
+		}
+		const ibmNodes = workflow.nodes.filter((node) => node.type === `${PACKAGE.name}.ibmQuantum`);
+		expect(ibmNodes.length).toBeGreaterThan(0);
+		for (const node of ibmNodes) expect(node.typeVersion).toBe(2);
 	});
 });
 

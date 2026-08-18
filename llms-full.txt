@@ -147,9 +147,15 @@ Shared by all three:
 | `qasm3` | string, required when format is `qasm3` | none | The OpenQASM 3 circuit. Typically an expression, e.g. `={{ $('Build').item.json.qasm3 }}`. Must start with an `OPENQASM 3` header or the node rejects it locally, before any quota is spent. |
 | `qpyCircuit` | string, required when format is `qpy` | none | The circuit as QPY that is **zlib compressed and then base64 encoded**. IBM decompresses on arrival, so base64 of the raw QPY bytes is rejected: submitting that live failed with reason code 1603, IBM having tried to read the base64 text as QASM. The node validates a real zlib header locally (first byte 0x78, header divisible by 31) and sends the value inside the wrapper the official client uses, `{"__type__": "QuantumCircuit", "__value__": <value>}`, rather than as a bare string. Produce it in Python with `qiskit.qpy.dump(circuit, buffer)` then `base64.b64encode(zlib.compress(buffer.getvalue()))`. |
 | `logLevel` | options `''`, `critical`, `error`, `warning`, `info`, `debug` | `''` | Sent as `log_level`; raises the verbosity IBM records, readable later with Get Logs. Omitted when empty. |
+| `submitSessionId` | string | `''` | Session or batch ID from Session Create; runs the job inside that reservation. Sent as top-level `session_id`. |
+| `maxCost` | number | 0 | Maximum runtime seconds before IBM cancels the job, sent as `cost`. Zero omits the field and lets the program decide. IBM allows at most 10800 (3 hours) and the node clamps to that. Worth setting on the Open plan, where the whole allowance is 600 seconds. |
+| `jobTags` | string | `''` | Comma-separated tags stored on the job (max 8). The practical way to find jobs again: filter on them in Job List, Workload List and both triggers. |
+| `privateJob` | boolean | false | Marks the job private (inputs and results hidden from other collaborators, and deleted after reading). Needs a plan that supports private jobs. |
+| `additionalOptions` | json | `{}` | Escape hatch merged into the job's `options` object: the primitive options for Sampler and Estimator, the learner options for the noise learner. For example `{"default_shots": 4096}`. Must be a JSON object. |
 
-Sampler and Estimator only (the noise learner takes bare circuits, not PUBs, and its options object
-is declared `additionalProperties: false`, so none of these may be sent with it):
+Sampler and Estimator only. The noise learner takes bare circuits rather than PUBs, so it has no
+parameter bindings, and its options object is declared `additionalProperties: false`, so the three
+error-suppression toggles below are never merged into it:
 
 | parameter | type | default | notes |
 | :-- | :-- | :-- | :-- |
@@ -157,11 +163,6 @@ is declared `additionalProperties: false`, so none of these may be sent with it)
 | `dynamicalDecoupling` | boolean | false | Sends `options.dynamical_decoupling.enable = true`. Safe on any circuit. |
 | `twirlingGates` | boolean | false | Sends `options.twirling.enable_gates = true`. MUST stay off for circuits containing fractional gates (a parametrised `rx` or `rzz`, which includes anything Qiskit transpiles for a Heron processor); IBM fails the job with "gate twirling does not support fractional gates". |
 | `twirlingMeasure` | boolean | false | Sends `options.twirling.enable_measure = true`. No fractional-gate restriction. |
-| `submitSessionId` | string | `''` | Session or batch ID from Session Create; runs the job inside that reservation. Sent as top-level `session_id`. |
-| `maxCost` | number | 0 | Maximum runtime seconds before IBM cancels the job, sent as `cost`. Zero omits the field and lets the program decide. IBM allows at most 10800 (3 hours) and the node clamps to that. Worth setting on the Open plan, where the whole allowance is 600 seconds. |
-| `jobTags` | string | `''` | Comma-separated tags stored on the job (max 8). The practical way to find jobs again: filter on them in Job List, Workload List and both triggers. |
-| `privateJob` | boolean | false | Marks the job private (inputs and results hidden from other collaborators, and deleted after reading). Needs a plan that supports private jobs. |
-| `additionalOptions` | json | `{}` | Escape hatch merged into the primitive `options` object, e.g. `{"default_shots": 4096}`. Must be a JSON object. |
 
 `submitSampler` only: `shots` (number, default 1024).
 `submitEstimator` only:

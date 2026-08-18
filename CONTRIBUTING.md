@@ -23,7 +23,7 @@ npm install --ignore-scripts
 | command | what it does |
 | :-- | :-- |
 | `npm run lint` | ESLint over `package.json`, `nodes` and `credentials`, with both the n8n community-nodes ruleset and `eslint-plugin-n8n-nodes-base`. This mirrors what the official verification scanner runs, so a clean local lint means a clean scan. |
-| `npm run build` | Compile TypeScript and copy icons into `dist` |
+| `npm run build` | Compile TypeScript, then copy the icons and the codex `.node.json` files into `dist` |
 | `npm test` | Vitest, the full unit suite |
 | `npm run test:coverage` | The same suite with coverage, checked against the thresholds in `vitest.config.mts` |
 | `npm run scan` | The official n8n community package scanner, run before submitting for verification |

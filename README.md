@@ -153,6 +153,13 @@ The credential ships a test that calls the backends endpoint, so the **Test** bu
 3. **Job &rsaquo; Submit to Sampler.** Backend `={{ $json.leastBusy }}`, OpenQASM 3 Circuit `={{ $('Build').item.json.qasm3 }}`, Shots `1024`. Outputs `jobId`.
 4. **Job &rsaquo; Get Results.** Job ID `={{ $json.jobId }}`, Poll Interval `5`, Max Wait `300`. Outputs the parsed `pubs`, each carrying `counts`.
 
+This flow uses the textbook `h` and `cx` gates so it stays readable, and a real QPU does not run
+those natively: submitted as-is to hardware, the job fails with `reason_code: 1517` and still
+spends quota. Before a hardware run, read [Transpilation](#transpilation), or build the same Bell
+state from native gates only as shown in
+[Building an ISA circuit directly in the node](#building-an-isa-circuit-directly-in-the-node),
+which runs as written.
+
 <p align="center">
   <img src="./readme-assets/05-least-busy.png" alt="Get Least Busy choosing the least busy QPU" width="720">
 </p>

@@ -5,9 +5,27 @@ All notable changes to this package are documented in this file.
 ## 0.4.1 (2026-08-18)
 
 A verification fix, 10 new operations across a 6th resource, and documentation written for machines
-as well as people. The node goes from 24 to 34 operations. Everything here was traced end to end:
-each change was followed through every caller, and the suite grew from 185 tests to 275 at 100%
-statement, branch, function and line coverage.
+as well as people. The node goes from 24 to 34 operations. The release was verified on IBM Quantum
+itself, through a real n8n 2.34.6 running the packed tarball against a live Open-plan instance,
+and every one of the 34 operations has run against the live service: every backend and account
+read, the workload listing, tag search, circuit build and import, the five local guards, the full
+session lifecycle on typeVersion 2, real Sampler, Estimator and QPY submissions to `ibm_kingston`,
+cancel, tag replacement and deletion on a real job, and both polling triggers seeding their cursor
+and then firing on real terminal jobs. Three of the fixes below were found by those runs, not by a
+test: IBM answered Backend Get Defaults on `ibm_marrakesh` with an empty body that failed the whole
+execution, List Tags came back as a bare 400 for every term under 3 characters, and a QPY circuit
+submitted as bare base64 failed with reason code 1603, reported by the Error Trigger on its own.
+Each fix was then re-run against the same service: the empty body now comes back as `{}`, the
+bound is checked before a request goes out, and the zlib-wrapped form was accepted and queued.
+The two operations that spend quota or write account state were verified without spending either.
+A Noise Learner job was accepted by the live endpoint, carried its `cost` cap of 60 on the job
+body, and was cancelled while still queued, its metrics showing `running: null` and zero seconds
+consumed. Set Cost Limit read the limit back correctly, while its write leg hit a server-side hang
+that IBM's edge answered with a 520 after about 50 seconds, reproduced with a raw HTTP request
+through the same credential, which places the fault on the service rather than the node, whose 30
+second timeout cut the hang exactly as designed. The run-by-run results are in the Tests section
+below. Each change was traced end to end through every caller, and the suite grew from 185 tests
+to 276 at 100% statement, branch, function and line coverage.
 
 ### Fixed
 
@@ -171,7 +189,7 @@ statement, branch, function and line coverage.
 
 ### Tests
 
-Unit suite: **275 tests**, up from 185, at 100% statement, branch, function and line coverage, with
+Unit suite: **276 tests**, up from 185, at 100% statement, branch, function and line coverage, with
 the thresholds raised to match so an untested line fails the build.
 
 Live verification ran against a throwaway n8n 2.34.6 with the package installed from its own
@@ -186,7 +204,7 @@ computation or a session that ran no jobs.
 | Codex metadata | categories and search aliases reach the picker | Development and Analytics, aliases Quantum, Qiskit, QPU, OpenQASM |
 | Backend chain, 6 operations | each answers, backend name flows by expression | least busy `ibm_marrakesh`, queue 41, `basis_gates` returned |
 | Get Defaults | some devices have none | empty body, reported as `{}` instead of crashing the run |
-| Account, 9 operations | usage, instance, config and all 4 analytics | all answered; **Get API Versions confirms `2026-04-15` is the only live version** |
+| Account, 8 read operations | usage, instance, config, API versions and all 4 analytics | all answered; **Get API Versions confirms `2026-04-15` is the only live version** |
 | Workload List | jobs, sessions and batches in one listing | 87 total, 68 jobs, 0 sessions, filters applied |
 | List Tags | tags matching a term | `qa-audit`, `qa-bell-native`, `qa-bigpayload` and more |
 | Circuit Build, native Bell | 13 gate entries, valid OpenQASM 3 | 13 gates, 17 lines, accepted by Import unchanged |
@@ -206,6 +224,9 @@ blocking wait, because the queue was 40 deep at the time.
 | QPY as `{__type__, __value__}` with zlib | accepted like any other job | queued alongside the valid submissions rather than refused on arrival |
 | **IBM Quantum Error Trigger** | detects the failure on its own and reports the reason | fired unprompted, carrying `reasonCode: 1603` and IBM's message, which is how the QPY defect was found |
 | Both polling triggers | seed a cursor, never fire on history | 0 firings on activation, then 2 each once jobs reached a terminal state |
+| Submit to **Noise Learner**, cancelled while queued | wire format accepted, no QPU time spent | accepted in 845 ms with `cost: 60` stored on the job body; metrics show `running: null`, zero seconds consumed |
+| **Update Tags**, then **Delete**, on that cancelled job | tags replaced, then the job gone | `["audit-nl", "cancelled-zero-cost"]` came back, then the delete answered and the job was removed |
+| **Set Cost Limit** round trip, writing the same 600 back | configuration unchanged, 204 on the write | the read leg answers in 0.8 s throughout; the write leg hung about 50 s on four attempts over 15 minutes and IBM's edge answered 520, reproduced with a raw HTTP request through the same credential, so the fault sits on the service side and the node's 30 second timeout cut the hang as designed |
 
 The verification scan was pre-flighted by rebuilding the scanner's own ESLint config from its
 source and validating the replica against the v0.3.3 tree, where it reproduced the 2 known

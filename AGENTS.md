@@ -49,7 +49,7 @@ classes and one credential. TypeScript, zero runtime dependencies, Node.js 22 or
 npm run lint && npm run build && npm run test:coverage
 ```
 
-Coverage is a gate, not a report: lines 100, statements 99, functions 100, branches 97. Adding code
+Coverage is a gate, not a report: 100 for statements, branches, functions and lines. Adding code
 without tests fails the build. `descriptions.ts` and the `*.node.ts` wrappers are excluded, but the
 node dispatcher is covered by `tests/node-routing.test.ts`, which walks every operation the UI
 advertises and fails if one is not routed.
