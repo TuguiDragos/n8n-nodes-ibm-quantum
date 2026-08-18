@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-ibm-quantum",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Verified n8n community node for IBM Quantum. Build OpenQASM 3 circuits, submit to Qiskit Runtime, and trigger on job completion or failure. Usable as an AI Agent tool.",
   "keywords": [
     "n8n-community-node-package",

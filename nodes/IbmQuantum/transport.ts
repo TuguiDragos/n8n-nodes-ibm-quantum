@@ -116,11 +116,16 @@ export async function ibmQuantumApiRequest(
 	if (qs !== undefined) options.qs = qs;
 
 	try {
-		return (await this.helpers.httpRequestWithAuthentication.call(
+		const response = await this.helpers.httpRequestWithAuthentication.call(
 			this,
 			'ibmQuantumApi',
 			options,
-		)) as IDataObject;
+		);
+		// A 204, or any empty body, arrives here as null. Passing that on would put `json: null`
+		// into the workflow, which n8n's execution engine dereferences without a null check and
+		// crashes the whole run on. It also protects the handlers that read a field off the
+		// response, such as getLeastBusy and submitJob.
+		return (response ?? {}) as IDataObject;
 	} catch (error) {
 		throw enrichApiError(this.getNode(), error);
 	}

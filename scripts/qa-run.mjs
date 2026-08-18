@@ -162,7 +162,7 @@ async function main() {
 		ibm('account analytics by date', { resource: 'account', operation: 'getAnalyticsByDate' }),
 		ibm('account analytics filters', { resource: 'account', operation: 'getAnalyticsFilters' }),
 		ibm('account api versions', { resource: 'account', operation: 'getApiVersions' }),
-		ibm('job list tags', { resource: 'job', operation: 'listTags', tagSearch: '' }),
+		ibm('job list tags', { resource: 'job', operation: 'listTags', tagSearch: 'qa-' }),
 		ibm('circuit build', BELL),
 		ibm('circuit import', { resource: 'circuit', operation: 'import',
 			qasm3Input: 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nbit[1] c;\nh q[0];\nc[0] = measure q[0];' }),

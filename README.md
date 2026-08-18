@@ -266,7 +266,7 @@ Both also accept **Tags** (comma separated, stored on the job and usable as a fi
 
 **Max Cost** caps how many runtime seconds a job may consume before IBM cancels it. Zero, the default, lets the program decide; IBM allows at most 10800 (3 hours) and the node clamps anything larger. It is worth setting on the Open plan, where the entire allowance is 600 seconds per 28 days and a single runaway job can spend it. For a ceiling across every job on the instance rather than one, use Account &rsaquo; Set Cost Limit.
 
-**Circuit Format** picks how the circuit is written. OpenQASM 3 is the default and the text form the Circuit resource builds. Choosing QPY instead swaps that field for **QPY Circuit**, which takes Qiskit's binary format base64 encoded, preserving circuits OpenQASM 3 cannot express; produce it with `qiskit.qpy.dump(circuit, buffer)` into a `BytesIO` and base64 the bytes. Either way the circuit still has to be ISA for the chosen backend, and either way the node validates it locally before spending a submission.
+**Circuit Format** picks how the circuit is written. OpenQASM 3 is the default and the text form the Circuit resource builds. Choosing QPY instead swaps that field for **QPY Circuit**, which preserves circuits OpenQASM 3 cannot express. The encoding is the one IBM's own client uses, and it is easy to get wrong: the QPY bytes must be **zlib compressed and only then base64 encoded**, because the service decompresses them on arrival. In Python that is `qiskit.qpy.dump(circuit, buffer)` followed by `base64.b64encode(zlib.compress(buffer.getvalue()))`. Base64 of the raw bytes is refused locally, with a message naming the missing step, because IBM otherwise accepts the job and fails it with reason code 1603 after trying to read the text as QASM. Either way the circuit still has to be ISA for the chosen backend, and either way the node validates it locally before spending a submission.
 
 ### Finding jobs again
 
@@ -283,7 +283,7 @@ Both also accept **Tags** (comma separated, stored on the job and usable as a fi
 | **Sort** / **Offset** | Order and paging |
 | **Include Circuit Params** | Brings each job's submitted circuit back into the response, which is omitted by default to keep listings small |
 
-Tags are the practical way to find your own work on a shared instance: set them on Submit, filter on them here and in both triggers. **Job &rsaquo; List Tags** shows which tags actually exist, optionally narrowed by a substring, which saves guessing at a name you set weeks ago.
+Tags are the practical way to find your own work on a shared instance: set them on Submit, filter on them here and in both triggers. **Job &rsaquo; List Tags** shows which tags actually exist, narrowed by a search term of 3 to 100 characters, which saves guessing at a name you set weeks ago. IBM offers no way to list every tag, so the term is required; a shorter one is refused locally rather than by a bare 400 from the API.
 
 **Log Level** on any Submit raises the verbosity IBM records for that job, and Get Logs reads it back afterwards. Leave it on Default unless you are chasing a failure.
 

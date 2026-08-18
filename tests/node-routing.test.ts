@@ -94,6 +94,7 @@ describe('every operation the UI advertises is routed', () => {
 		observables: '"Z"',
 		jobId: 'job-1',
 		sessionId: 'sess-1',
+		tagSearch: 'qa-run',
 		numQubits: 1,
 		numClbits: 1,
 		gates: { gate: [{ gate: 'x', qubits: '0' }] },

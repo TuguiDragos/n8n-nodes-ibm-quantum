@@ -188,10 +188,23 @@ describe('job tag listing', () => {
 		expect(requests[0].qs).toEqual({ type: 'job', search: 'experiment' });
 	});
 
-	it('sends an empty search rather than omitting a parameter the API requires', async () => {
-		const { ctx, requests } = makeExecuteContext({ http: () => ({}) });
+	// Found live: IBM answers a search shorter than 3 characters with a bare 400 that names
+	// neither the field nor the limit, so the bound is enforced before the request goes out.
+	it.each([['', 'gol'], ['ab', 'prea scurt'], ['x'.repeat(101), 'prea lung']])(
+		'refuses a search that is %s (%s) before spending a request',
+		async (search) => {
+			const { ctx, requests } = makeExecuteContext({ params: { tagSearch: search }, http: () => ({}) });
+			await expect(handleJob.call(ctx, TEST_CTX, 'listTags', 0)).rejects.toThrow(
+				/Search must be between 3 and 100 characters/,
+			);
+			expect(requests).toHaveLength(0);
+		},
+	);
+
+	it('accepts a term at the lower bound', async () => {
+		const { ctx, requests } = makeExecuteContext({ params: { tagSearch: 'qa-' }, http: () => ({}) });
 		await handleJob.call(ctx, TEST_CTX, 'listTags', 0);
-		expect(requests[0].qs).toEqual({ type: 'job', search: '' });
+		expect(requests[0].qs).toEqual({ type: 'job', search: 'qa-' });
 	});
 });
 

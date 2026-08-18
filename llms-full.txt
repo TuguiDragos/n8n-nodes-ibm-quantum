@@ -3,7 +3,7 @@
 This file is the machine-oriented reference for the `n8n-nodes-ibm-quantum` package: every node,
 operation, parameter (with its internal name), output shape and known hardware pitfall, stated
 plainly so an LLM can configure the nodes or generate n8n workflow JSON without guessing.
-It is generated from the source of version 0.4.0 (August 2026). The human-oriented documentation
+It is generated from the source of version 0.4.1 (August 2026). The human-oriented documentation
 is README.md; release history is CHANGELOG.md.
 
 Unofficial, community-maintained package. Not affiliated with, endorsed by, or sponsored by IBM.
@@ -98,7 +98,7 @@ with "Ran too long". Zero, or any non-positive value, sends an explicit `null` a
 | :-- | :-- | :-- |
 | `list` (default) | none | raw IBM body: `{ devices: [ { name, qubits, is_simulator, status: { name }, queue_length, ... } ] }` |
 | `getConfiguration` | `backendName` (string, required) | raw IBM body; includes `basis_gates` (the native gate set) and the coupling map |
-| `getDefaults` | `backendName` (string, required) | raw IBM body: default settings and calibration data. Simulators may not support it. |
+| `getDefaults` | `backendName` (string, required) | raw IBM body: default settings and calibration data. Many devices have none: IBM answers with an empty body, which the node reports as `{}` rather than passing a null item into the workflow. Verified against ibm_marrakesh. |
 | `getProperties` | `backendName` (string, required) | raw IBM body: calibration data (T1/T2, gate errors, readout errors) |
 | `getStatus` | `backendName` (string, required) | raw IBM body: operational state and queue length |
 | `getLeastBusy` | `minQubits` (number, default 0; 0 disables the filter), `includeSimulators` (boolean, default false) | `{ leastBusy: string\|null, queueLength: number\|null, candidates: [{ name, queueLength, qubits, status }] }` |
@@ -145,7 +145,7 @@ Shared by all three:
 | `backend` | string, required | none | Device that runs the circuit. The circuit must already be ISA (transpiled) for THIS backend; see "Hardware reality" below. |
 | `circuitFormat` | options `qasm3` or `qpy` | `qasm3` | Which field below carries the circuit. A workflow saved before this parameter existed has no value stored and behaves as `qasm3`. |
 | `qasm3` | string, required when format is `qasm3` | none | The OpenQASM 3 circuit. Typically an expression, e.g. `={{ $('Build').item.json.qasm3 }}`. Must start with an `OPENQASM 3` header or the node rejects it locally, before any quota is spent. |
-| `qpyCircuit` | string, required when format is `qpy` | none | The circuit as base64-encoded QPY. Must begin with `UUlTS0lU`, the base64 of the QPY magic bytes, or the node rejects it locally. Produce it with `qiskit.qpy.dump(circuit, buffer)` into a BytesIO and base64 the bytes. |
+| `qpyCircuit` | string, required when format is `qpy` | none | The circuit as QPY that is **zlib compressed and then base64 encoded**. IBM decompresses on arrival, so base64 of the raw QPY bytes is rejected: submitting that live failed with reason code 1603, IBM having tried to read the base64 text as QASM. The node validates a real zlib header locally (first byte 0x78, header divisible by 31) and sends the value inside the wrapper the official client uses, `{"__type__": "QuantumCircuit", "__value__": <value>}`, rather than as a bare string. Produce it in Python with `qiskit.qpy.dump(circuit, buffer)` then `base64.b64encode(zlib.compress(buffer.getvalue()))`. |
 | `logLevel` | options `''`, `critical`, `error`, `warning`, `info`, `debug` | `''` | Sent as `log_level`; raises the verbosity IBM records, readable later with Get Logs. Omitted when empty. |
 
 Sampler and Estimator only (the noise learner takes bare circuits, not PUBs, and its options object
@@ -183,6 +183,9 @@ the noise on the backend's entangling layers and returns learned Pauli-Lindblad 
 rather than counts, so read it with Get Results and inspect `raw`. Raising the randomizations and
 shots is what makes a learning job expensive, which matters on the Open plan.
 
+A QPY circuit is never sent as a plain string: wherever a PUB or `circuits` entry carries one, it
+appears as `{"__type__": "QuantumCircuit", "__value__": "<base64 of zlib-compressed QPY>"}`.
+
 Request body sent: `{ program_id: "sampler"|"estimator"|"noise-learner", backend, params: {...},
 session_id?, tags?, private?, cost?, log_level? }`. For Sampler and Estimator, `params` is
 `{ version: 2, pubs: [pub], options?, resilience_level? }` and the node submits exactly one PUB per
@@ -199,7 +202,7 @@ Other job operations:
 | `getLogs` | `jobId` | `{ jobId, logs }` (logs is plain text) |
 | `getMetrics` | `jobId` | raw IBM body: timestamps and usage, including `qpu_charge_time_seconds`. Note that `bss`, `usage.quantum_seconds` and `usage.seconds` were removed by IBM in API version 2026-03-15. |
 | `list` | `limit` (default 50, max 200, IBM's hard cap), `listFilters` (collection, below) | raw IBM body: `{ jobs: [...], count?, limit?, offset? }`, newest first by default |
-| `listTags` | `tagSearch` (string, optional substring) | raw IBM body: the tags in use on your jobs. The API requires both `type` and `search`, so the node always sends `type=job` and an empty search when you give none. |
+| `listTags` | `tagSearch` (string, required, 3 to 100 characters) | raw IBM body: the tags in use on your jobs that contain the term. IBM has no way to list every tag: a term shorter than 3 characters is refused with a bare 400 naming neither the field nor the limit, so the node checks the bound locally first. `type=job` is always sent, being the only value the API accepts. |
 | `updateTags` | `jobId`, `jobTags` | `{ jobId, tags }`. PUT replaces the FULL tag list; empty input clears all tags. |
 | `cancel` | `jobId` | `{ jobId, cancelled: true }` |
 | `delete` | `jobId` | `{ jobId, deleted: true }` (permanent) |

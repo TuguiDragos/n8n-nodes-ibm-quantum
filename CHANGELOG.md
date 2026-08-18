@@ -2,11 +2,11 @@
 
 All notable changes to this package are documented in this file.
 
-## 0.4.0 (2026-08-17)
+## 0.4.1 (2026-08-18)
 
 A verification fix, 10 new operations across a 6th resource, and documentation written for machines
 as well as people. The node goes from 24 to 34 operations. Everything here was traced end to end:
-each change was followed through every caller, and the suite grew from 185 tests to 264 at 100%
+each change was followed through every caller, and the suite grew from 185 tests to 275 at 100%
 statement, branch, function and line coverage.
 
 ### Fixed
@@ -18,6 +18,20 @@ statement, branch, function and line coverage.
   the triggers could never run anyway (a polling trigger implements `poll()`, not `execute()`);
   removing the property also removes them from the AI Agent tool picker. The local lint now runs
   the same plugin version the scanner pins and passes with zero errors.
+
+- **An empty response body no longer fails the whole execution.** IBM answers
+  `GET /backends/{id}/defaults` with no content for many devices. The node passed that through as
+  `json: null`, and n8n's execution engine reads `json.$error` off every result behind an
+  `!== undefined` check that a null slips past, so one empty body ended the run with
+  `Cannot read properties of null`. The transport now returns `{}` for an empty body, which also
+  protects the handlers that read a field off the response, such as Get Least Busy and Submit.
+  *Found on live hardware against ibm_marrakesh, not by any unit test.*
+
+- **List Tags now works at all.** The endpoint requires a search term of at least 3 characters, a
+  constraint the first implementation missed, so every call came back as a bare `400` naming
+  neither the field nor the limit. The term is now required in the UI and its bounds are checked
+  locally. A sweep of every parameter constraint on the endpoints this node calls confirmed the
+  others are already respected. *Found on live hardware.*
 
 - **An unknown resource no longer runs a job operation.** The dispatcher ended in an `else` that
   sent anything unrecognised to `handleJob`, so a resource sharing an operation name with the job
@@ -40,11 +54,17 @@ statement, branch, function and line coverage.
   days, and a failed job spends it too, so a cap is the cheapest protection available. Clamped to
   the 10800 IBM permits.
 
-- **QPY circuits.** Submit gains **Circuit Format**, choosing between OpenQASM 3 and base64 QPY,
-  which preserves circuits OpenQASM 3 cannot express. The local pre-submit guard is preserved rather
-  than relaxed: a QPY payload is checked for the `UUlTS0lU` prefix, the base64 encoding of the QPY
-  magic bytes, exactly as an OpenQASM 3 circuit is checked for its version header. A workflow saved
-  before this parameter existed stores no value for it and still submits OpenQASM 3.
+- **QPY circuits.** Submit gains **Circuit Format**, choosing between OpenQASM 3 and QPY, which
+  preserves circuits OpenQASM 3 cannot express. The wire format is not the obvious one, and the
+  first implementation got it wrong: IBM does not accept a bare base64 string. The official client
+  wraps every circuit as `{ "__type__": "QuantumCircuit", "__value__": base64(zlib(qpy)) }`, and the
+  server decompresses without asking, so uncompressed bytes cannot work. *Measured:* a live
+  submission of base64 QPY came back as reason code 1603, IBM having tried to read the base64 text
+  as QASM and tripped over its capital letters. The node now sends the wrapper, and the local guard
+  checks for a real zlib header (first byte 0x78, header divisible by 31) rather than a magic
+  string. Pasting uncompressed QPY, the natural mistake, is recognised and answered with the exact
+  missing step. A workflow saved before this parameter existed stores no value for it and still
+  submits OpenQASM 3.
 
 - **Workload resource,** wrapping `GET /v1/workloads`: jobs, sessions and batches in one listing,
   with free-text search over IDs and tags, a mode filter, status multi-select, and cursor paging.
@@ -71,9 +91,9 @@ statement, branch, function and line coverage.
   can be read from a workflow instead of from the docs. *Verified live:* the endpoint answers
   unauthenticated and reports `2026-04-15` as the only version with status `live`.
 
-- **Job List Tags,** wrapping `GET /v1/tags`. The API requires both `type` and `search`, so the node
-  sends `type=job` and an empty search when none is given, rather than failing on a missing
-  parameter.
+- **Job List Tags,** wrapping `GET /v1/tags`. The API requires a search term of 3 to 100 characters
+  and offers no way to list every tag, so the term is required and its bounds are checked locally.
+  `type=job` is always sent, being the only value the endpoint accepts.
 
 - **Log Level on every submit,** sent as `log_level` and readable afterwards with Get Logs.
 
@@ -148,6 +168,48 @@ statement, branch, function and line coverage.
   tried, but community node packages are forbidden from declaring one, and the lint rule says so
   explicitly. The published package has no runtime dependencies at all, so nothing reaches a user;
   the finding is confined to the development tree and waits on n8n.
+
+### Tests
+
+Unit suite: **275 tests**, up from 185, at 100% statement, branch, function and line coverage, with
+the thresholds raised to match so an untested line fails the build.
+
+Live verification ran against a throwaway n8n 2.34.6 with the package installed from its own
+`npm pack` tarball, the way n8n installs a community package, talking to a real IBM Quantum
+instance on the Open plan. Zero QPU seconds were spent: every operation below is a read, a local
+computation or a session that ran no jobs.
+
+| what was exercised | expected | observed |
+| :-- | :-- | :-- |
+| n8n loads the package | 3 node types under the real package prefix | plus 1 tool variant, and **no trigger tool variants**, which the 0.3.3 ruleset had forced |
+| Action node version | `[1, 2]`, default 2 | exactly that, loaded by n8n itself |
+| Codex metadata | categories and search aliases reach the picker | Development and Analytics, aliases Quantum, Qiskit, QPU, OpenQASM |
+| Backend chain, 6 operations | each answers, backend name flows by expression | least busy `ibm_marrakesh`, queue 41, `basis_gates` returned |
+| Get Defaults | some devices have none | empty body, reported as `{}` instead of crashing the run |
+| Account, 9 operations | usage, instance, config and all 4 analytics | all answered; **Get API Versions confirms `2026-04-15` is the only live version** |
+| Workload List | jobs, sessions and batches in one listing | 87 total, 68 jobs, 0 sessions, filters applied |
+| List Tags | tags matching a term | `qa-audit`, `qa-bell-native`, `qa-bigpayload` and more |
+| Circuit Build, native Bell | 13 gate entries, valid OpenQASM 3 | 13 gates, 17 lines, accepted by Import unchanged |
+| The 5 local guards | every one refuses before a request goes out | all 5 refused, 0 requests sent |
+| Session lifecycle on **typeVersion 2** | create with `sessionMode`, get, stop accepting, close | full cycle green against a real session |
+| Dedicated session on the Open plan | IBM's own message, not a generic failure | "You are not authorized to run a session when using the open plan" |
+| QPY guard against real Qiskit output | the magic the guard checks matches a real payload | Qiskit 2.5.2 produced 249 bytes whose base64 starts with `UUlTS0lU`, exactly the constant |
+
+A second pass submitted real jobs to `ibm_kingston`, using the trigger pattern rather than a
+blocking wait, because the queue was 40 deep at the time.
+
+| what was exercised | expected | observed |
+| :-- | :-- | :-- |
+| Submit with **Max Cost** and **Log Level** | job accepted, `cost` stored on it | accepted; the job body carries `cost: 60` and an estimated runtime of 4.01 seconds |
+| Submit then Cancel | job reaches Cancelled without running | Cancelled, no QPU time charged |
+| **QPY as a bare base64 string** | unknown, never tried before | rejected, **reason code 1603**: IBM tried to load the text as QASM. This is what proved the wire format wrong. |
+| QPY as `{__type__, __value__}` with zlib | accepted like any other job | queued alongside the valid submissions rather than refused on arrival |
+| **IBM Quantum Error Trigger** | detects the failure on its own and reports the reason | fired unprompted, carrying `reasonCode: 1603` and IBM's message, which is how the QPY defect was found |
+| Both polling triggers | seed a cursor, never fire on history | 0 firings on activation, then 2 each once jobs reached a terminal state |
+
+The verification scan was pre-flighted by rebuilding the scanner's own ESLint config from its
+source and validating the replica against the v0.3.3 tree, where it reproduced the 2 known
+`node-usable-as-tool` errors exactly. On this release it reports none.
 
 ## 0.3.3 (2026-08-02)
 

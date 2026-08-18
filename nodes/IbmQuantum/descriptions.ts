@@ -569,9 +569,9 @@ export const nodeProperties: INodeProperties[] = [
 		typeOptions: { rows: 4 },
 		required: true,
 		default: '',
-		placeholder: 'UUlTS0lU...',
+		placeholder: 'eJwL9Az2...',
 		description:
-			'Circuit to submit, as base64-encoded QPY. Produce it by writing qiskit.qpy.dump(circuit, buffer) to a BytesIO and base64 encoding the bytes. It must already be transpiled (ISA) for the chosen backend.',
+			'Circuit to submit, as QPY that is zlib compressed and then base64 encoded, which is the form IBM decompresses on arrival. In Python: dump with qiskit.qpy.dump(circuit, buffer), then base64.b64encode(zlib.compress(buffer.getvalue())). Base64 of the raw QPY bytes is rejected. The circuit must already be transpiled (ISA) for the chosen backend.',
 		displayOptions: {
 			show: { resource: ['job'], operation: ALL_SUBMIT_OPS, circuitFormat: ['qpy'] },
 		},
@@ -704,10 +704,11 @@ export const nodeProperties: INodeProperties[] = [
 		displayName: 'Search',
 		name: 'tagSearch',
 		type: 'string',
+		required: true,
 		default: '',
 		placeholder: 'experiment',
 		description:
-			'Substring the returned tags must contain. Leave empty to list every tag on your jobs.',
+			'Substring the returned tags must contain, between 3 and 100 characters. IBM has no way to list every tag, so a term is always required.',
 		displayOptions: { show: { resource: ['job'], operation: ['listTags'] } },
 	},
 	{

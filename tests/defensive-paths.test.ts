@@ -1,10 +1,16 @@
 import { NodeApiError, NodeOperationError, type INode } from 'n8n-workflow';
 import { describe, expect, it } from 'vitest';
 
-import { extractJobStatus, handleJob, mergePrimitiveOptions } from '../nodes/IbmQuantum/operations';
+import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
+import {
+	extractJobStatus,
+	handleJob,
+	isZlibBase64,
+	mergePrimitiveOptions,
+} from '../nodes/IbmQuantum/operations';
 import { parseSamplerPub } from '../nodes/IbmQuantum/results';
 import { asNodeError, errorMessage } from '../nodes/IbmQuantum/transport';
-import { fakeNode, makeExecuteContext, TEST_CTX } from './fakeContext';
+import { fakeNode, makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 // These paths exist because a catch binding is `unknown` and because n8n hands parameters back
 // untyped. They are cheap to get wrong and impossible to notice, so each one is pinned here.
@@ -133,5 +139,74 @@ describe('node identity used by the helpers', () => {
 	it('builds a node stub the error helpers accept', () => {
 		const node: INode = fakeNode(2);
 		expect(node.typeVersion).toBe(2);
+	});
+});
+
+describe('an empty response body never reaches n8n as null', () => {
+	// Found on live hardware: IBM answers GET /backends/{id}/defaults with no content for some
+	// devices. The node used to pass that straight through as `json: null`, and n8n's execution
+	// engine reads `json.$error` off every result without a null check, so a single empty body
+	// failed the whole run with "Cannot read properties of null".
+	const runBackend = (respond: () => unknown) => {
+		const requests: HttpCall[] = [];
+		const all: Record<string, unknown> = {
+			resource: 'backend',
+			operation: 'getDefaults',
+			backendName: 'ibm_marrakesh',
+		};
+		const ctx = {
+			getInputData: () => [{ json: {} }],
+			getNode: () => fakeNode(2),
+			continueOnFail: () => false,
+			logger: { warn: () => {} },
+			getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
+			getNodeParameter: (name: string, _i?: number, fallback?: unknown) =>
+				name in all ? all[name] : fallback,
+			helpers: {
+				httpRequestWithAuthentication: async (_n: string, o: HttpCall) => {
+					requests.push(o);
+					return respond();
+				},
+			},
+		};
+		return new IbmQuantum().execute.call(ctx as never);
+	};
+
+	it.each([
+		['null', () => null],
+		['undefined', () => undefined],
+	])('turns a %s body into an empty object', async (_label, respond) => {
+		const result = await runBackend(respond);
+		expect(result[0]).toHaveLength(1);
+		expect(result[0][0].json).toEqual({});
+		expect(result[0][0].json).not.toBeNull();
+	});
+
+	it('leaves a real body untouched', async () => {
+		const result = await runBackend(() => ({ rz: 0.1 }));
+		expect(result[0][0].json).toEqual({ rz: 0.1 });
+	});
+});
+
+describe('isZlibBase64', () => {
+	// A zlib stream opens with 0x78 and a two byte header that is a multiple of 31. The guard reads
+	// only the first four base64 characters, so every rejection path needs its own case.
+	it('accepts each compression level zlib emits', () => {
+		for (const second of [0x01, 0x5e, 0x9c, 0xda]) {
+			expect(isZlibBase64(Buffer.from([0x78, second, 0, 0]).toString('base64'))).toBe(true);
+		}
+	});
+
+	it('rejects a string too short to carry a header', () => {
+		expect(isZlibBase64('')).toBe(false);
+		expect(isZlibBase64('eJ')).toBe(false);
+	});
+
+	it('rejects a first byte that is not 0x78', () => {
+		expect(isZlibBase64(Buffer.from([0x51, 0x49, 0x53, 0x4b]).toString('base64'))).toBe(false);
+	});
+
+	it('rejects a header whose checksum does not divide by 31', () => {
+		expect(isZlibBase64(Buffer.from([0x78, 0x00, 0, 0]).toString('base64'))).toBe(false);
 	});
 });

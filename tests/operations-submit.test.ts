@@ -128,19 +128,36 @@ describe('submitJob request body (TEST-01)', () => {
 	});
 
 	describe('circuit format', () => {
-		// A real QPY file opens with the ASCII magic QISKIT, so any base64 of one starts with UUlTS0lU.
-		const QPY = Buffer.from('QISKIT binary body').toString('base64');
+		// What the official client actually puts on the wire: QPY bytes, zlib compressed, base64
+		// encoded. A zlib stream opens with 0x78 0x9C, so the base64 starts "eJw".
+		const QPY = Buffer.from([0x78, 0x9c, 0x0b, 0xf4, 0x0c, 0xf6]).toString('base64');
+		// Base64 of raw, uncompressed QPY. This is the natural mistake, and IBM answered a live
+		// submission of it with reason code 1603 after trying to read the text as QASM.
+		const RAW_QPY = Buffer.from('QISKIT binary body').toString('base64');
 
-		it('sends a base64 QPY payload as the PUB circuit', async () => {
+		it('wraps the payload the way the official client does', async () => {
 			const { body } = await submit('submitSampler', {
 				circuitFormat: 'qpy',
 				qpyCircuit: QPY,
 				shots: 256,
 			});
-			expect((body.params as Record<string, unknown>).pubs).toEqual([[QPY, null, 256]]);
+			expect((body.params as Record<string, unknown>).pubs).toEqual([
+				[{ __type__: 'QuantumCircuit', __value__: QPY }, null, 256],
+			]);
 		});
 
-		it('rejects a QPY payload without the magic before spending a submission', async () => {
+		it('names the missing step when the payload was never compressed', async () => {
+			const { ctx, requests } = makeExecuteContext({
+				params: { backend: 'ibm_kingston', circuitFormat: 'qpy', qpyCircuit: RAW_QPY },
+				http: () => ({ id: 'job-123' }),
+			});
+			await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+				/QPY Circuit is uncompressed/,
+			);
+			expect(requests).toHaveLength(0);
+		});
+
+		it('rejects anything that is not a zlib stream before spending a submission', async () => {
 			const { ctx, requests } = makeExecuteContext({
 				params: {
 					backend: 'ibm_kingston',
@@ -150,7 +167,7 @@ describe('submitJob request body (TEST-01)', () => {
 				http: () => ({ id: 'job-123' }),
 			});
 			await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
-				/not a base64-encoded QPY payload/,
+				/not base64 encoded zlib compressed QPY/,
 			);
 			expect(requests).toHaveLength(0);
 		});

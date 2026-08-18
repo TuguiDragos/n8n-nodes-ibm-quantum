@@ -127,7 +127,9 @@ export class IbmQuantum implements INodeType {
 					}
 				}
 
-				returnData.push({ json: result, pairedItem: { item: i } });
+				// Never emit a null item: n8n's engine reads json.$error off every result without a
+				// null check, so one empty response would fail the whole execution.
+				returnData.push({ json: result ?? {}, pairedItem: { item: i } });
 			} catch (error) {
 				if (this.continueOnFail()) {
 					returnData.push({ json: { error: errorMessage(error) }, pairedItem: { item: i } });

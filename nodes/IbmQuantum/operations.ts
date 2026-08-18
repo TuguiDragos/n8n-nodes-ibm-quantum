@@ -15,6 +15,10 @@ const CONTROLLED_TWO = new Set(['cx', 'cz', 'crx', 'cry', 'crz']);
 // IBM refuses a job cost above three hours and silently caps anything larger.
 export const MAX_JOB_COST_SECONDS = 10800;
 
+// The tag search endpoint accepts a term of 3 to 100 characters and rejects anything else.
+export const TAG_SEARCH_MIN = 3;
+export const TAG_SEARCH_MAX = 100;
+
 // Build a GateOperation from parsed, validated input.
 function mapGate(gate: string, qubits: number[], params: number[], clbit?: number): GateOperation {
 	// Normalize the missing-clbit case to 0 here, because that is the value validateGateInput
@@ -112,15 +116,42 @@ function requireQasm3Header(qasm3: string, label: string, node: INode, itemIndex
 	}
 }
 
-// Every QPY payload opens with the ASCII magic QISKIT. Six bytes fill two whole base64 groups, so
-// an encoded file starts with exactly these eight characters and a prefix test is exact.
-export const QPY_BASE64_MAGIC = 'UUlTS0lU';
+// Base64 of the ASCII magic QISKIT, which is how an *uncompressed* QPY file starts. IBM does not
+// accept that: it decompresses the payload before reading it, so this prefix means the circuit was
+// encoded a step too early. Recognising it lets the error say exactly what is missing.
+export const QPY_UNCOMPRESSED_PREFIX = 'UUlTS0lU';
+
+// A zlib stream starts with a two byte header whose first byte is 0x78 and whose 16 bit value is a
+// multiple of 31. Four base64 characters carry three bytes, which is enough to check both.
+export function isZlibBase64(value: string): boolean {
+	if (value.length < 4) return false;
+	const head = Buffer.from(value.slice(0, 4), 'base64');
+	if (head.length < 2 || head[0] !== 0x78) return false;
+	return ((head[0] << 8) | head[1]) % 31 === 0;
+}
+
+// IBM refuses a bare QPY string: the official client wraps every circuit as
+// { __type__: 'QuantumCircuit', __value__: base64(zlib(qpy)) } and the server decompresses without
+// asking, so an uncompressed payload cannot work. Verified against qiskit-ibm-runtime 0.49.0 and
+// against a live job that came back with reason code 1603, complaining that it could not load the
+// base64 text as QASM.
+export function qpyCircuitPayload(value: string): IDataObject {
+	return { __type__: 'QuantumCircuit', __value__: value.trim() };
+}
 
 function requireQpyPayload(circuit: string, node: INode, itemIndex: number): void {
-	if (!circuit.trimStart().startsWith(QPY_BASE64_MAGIC)) {
+	const value = circuit.trim();
+	if (value.startsWith(QPY_UNCOMPRESSED_PREFIX)) {
 		throw new NodeOperationError(
 			node,
-			'QPY Circuit is not a base64-encoded QPY payload (the encoding of a QPY file starts with "UUlTS0lU"). Produce it with qiskit.qpy.dump into a BytesIO and base64-encode the bytes.',
+			'QPY Circuit is uncompressed. IBM decompresses the payload before reading it, so the QPY bytes must be zlib compressed and only then base64 encoded. In Python: base64.b64encode(zlib.compress(buffer.getvalue())).',
+			{ itemIndex },
+		);
+	}
+	if (!isZlibBase64(value)) {
+		throw new NodeOperationError(
+			node,
+			'QPY Circuit is not base64 encoded zlib compressed QPY. Produce it with qiskit.qpy.dump into a BytesIO, zlib compress the bytes, then base64 encode them.',
 			{ itemIndex },
 		);
 	}
@@ -289,7 +320,7 @@ export function mergePrimitiveOptions(
 // (circuit, observables, parameters?, precision?), extended past the required two items only when needed.
 export function buildPubData(
 	primitive: 'sampler' | 'estimator',
-	circuit: string,
+	circuit: unknown,
 	observables: unknown,
 	parameters: unknown,
 	shots: number,
@@ -343,7 +374,7 @@ function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDat
 function readSubmitEnvelope(
 	this: IExecuteFunctions,
 	itemIndex: number,
-): { backend: string; circuit: string; sessionId: string; body: IDataObject } {
+): { backend: string; circuit: unknown; sessionId: string; body: IDataObject } {
 	const backend = this.getNodeParameter('backend', itemIndex) as string;
 	// A workflow saved before the format selector existed stores no circuitFormat, so the default
 	// keeps it on the OpenQASM 3 field it already filled in.
@@ -353,6 +384,8 @@ function readSubmitEnvelope(
 	const sessionId = this.getNodeParameter('submitSessionId', itemIndex, '') as string;
 
 	requireSupportedCircuit(circuit, format, this.getNode(), itemIndex);
+	// QPY travels as the wrapper the official client sends, not as a bare string.
+	const payload = format === 'qpy' ? qpyCircuitPayload(circuit) : circuit;
 
 	const body: IDataObject = {};
 	// session_id is a sibling of program_id/backend/params, never inside params.
@@ -371,7 +404,7 @@ function readSubmitEnvelope(
 	const logLevel = this.getNodeParameter('logLevel', itemIndex, '') as string;
 	if (logLevel) body.log_level = logLevel;
 
-	return { backend, circuit, sessionId, body };
+	return { backend, circuit: payload, sessionId, body };
 }
 
 async function submitJob(
@@ -653,12 +686,21 @@ export async function handleJob(
 	}
 
 	if (operation === 'listTags') {
-		// The API requires both parameters. `type` has only one value today, so it is sent rather
-		// than offered, and an empty search would be rejected, so it falls back to matching all.
+		// IBM rejects a search shorter than 3 characters with a bare 400 that names neither the
+		// field nor the limit, so the bound is enforced here instead. There is no way to ask for
+		// every tag: the endpoint always wants a term. `type` has one value today, so it is sent
+		// rather than offered.
 		const search = (this.getNodeParameter('tagSearch', itemIndex, '') as string).trim();
+		if (search.length < TAG_SEARCH_MIN || search.length > TAG_SEARCH_MAX) {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Search must be between ${TAG_SEARCH_MIN} and ${TAG_SEARCH_MAX} characters. IBM cannot list every tag, so a term is always required.`,
+				{ itemIndex },
+			);
+		}
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/tags', undefined, {
 			type: 'job',
-			search: search || '',
+			search,
 		});
 	}
 
@@ -676,7 +718,11 @@ export async function handleJob(
 			'GET',
 			`/jobs/${jobId}/logs`,
 		)) as unknown;
-		const logs = typeof response === 'string' ? response : ((response as IDataObject) ?? '');
+		// Plain text comes back as a string. The transport turns an empty body into {}, which here
+		// means no logs rather than an object worth returning.
+		const body = response as IDataObject;
+		const hasFields = Boolean(body) && Object.keys(body).length > 0;
+		const logs = typeof response === 'string' ? response : hasFields ? body : '';
 		return { jobId, logs };
 	}
 	if (operation === 'updateTags') {
