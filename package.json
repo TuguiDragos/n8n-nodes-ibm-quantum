@@ -78,7 +78,7 @@
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "9.29.0",
     "eslint-plugin-n8n-nodes-base": "^1.16.7",
-    "n8n-workflow": "2.34.3",
+    "n8n-workflow": "2.35.1",
     "prettier": "^3.9.6",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.67.0",
