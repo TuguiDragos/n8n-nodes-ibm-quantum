@@ -22,7 +22,9 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
-      # Lints the working tree against whatever ruleset is current today.
+      # Lints the working tree against the ruleset the lockfile pins. This is the control: it
+      # proves the tree is still clean under the rules we develop against. Drift is detected by
+      # the scanner below, which fetches the current ruleset itself.
       - run: npm run lint
       # Then the official scanner, against the published package: provenance, the source the
       # attestation points at, and the same lint rules the verification team runs.

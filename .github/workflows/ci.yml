@@ -29,6 +29,9 @@ jobs:
       # or test, so skip install scripts to keep the matrix green on every Node version.
       - run: npm ci --ignore-scripts
       - run: npm run lint
+      # Prettier is the documented formatting rule, but ESLint does not enforce it, so without
+      # this step an unformatted pull request would still pass CI.
+      - run: npm run format:check
       - run: npm run build
       # Coverage rather than a plain test run, so the thresholds in vitest.config.mts are an
       # actual gate. Without this they only apply when someone remembers to run them locally.
