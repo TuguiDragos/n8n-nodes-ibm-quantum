@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-ibm-quantum",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Verified n8n community node for IBM Quantum. Build OpenQASM 3 circuits, submit to Qiskit Runtime, and trigger on job completion or failure. Usable as an AI Agent tool.",
   "keywords": [
     "n8n-community-node-package",
@@ -42,7 +42,7 @@
     "format:check": "prettier nodes credentials --check",
     "lint": "eslint package.json nodes credentials",
     "lintfix": "eslint package.json nodes credentials --fix",
-    "scan": "npx --yes @n8n/scan-community-package@latest",
+    "scan": "npx --yes @n8n/scan-community-package@latest n8n-nodes-ibm-quantum",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -75,13 +75,13 @@
   "devDependencies": {
     "@n8n/eslint-plugin-community-nodes": "^0.29.0",
     "@types/node": "^26.2.0",
-    "@vitest/coverage-v8": "^4.1.10",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "9.29.0",
-    "eslint-plugin-n8n-nodes-base": "^1.16.7",
-    "n8n-workflow": "2.34.3",
+    "eslint-plugin-n8n-nodes-base": "^2.0.0",
+    "n8n-workflow": "2.35.3",
     "prettier": "^3.9.6",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.67.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   }
 }

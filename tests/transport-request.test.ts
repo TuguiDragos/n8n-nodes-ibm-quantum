@@ -32,9 +32,18 @@ describe('ibmQuantumApiRequest option building (TEST-05)', () => {
 			json: true,
 			timeout: 30000,
 			arrayFormat: 'repeat',
+			// Recorded by the fake so a wrong identifier here cannot pass the suite.
+			credentialName: 'ibmQuantumApi',
 		});
 		expect('body' in options).toBe(false);
 		expect('qs' in options).toBe(false);
+	});
+
+	// n8n resolves the credential by this exact name; a typo authenticates nothing and only shows
+	// up at runtime.
+	it('authenticates with the ibmQuantumApi credential', async () => {
+		const { options } = await call('GET', '/backends');
+		expect(options.credentialName).toBe('ibmQuantumApi');
 	});
 
 	it('attaches qs only when provided', async () => {

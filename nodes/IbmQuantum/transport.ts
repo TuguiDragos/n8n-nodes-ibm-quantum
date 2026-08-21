@@ -175,6 +175,31 @@ export function extractIbmError(error: unknown): IbmErrorDetail | null {
 	return solution ? { message, solution } : { message };
 }
 
+// IBM's error bodies are inconsistent. A missing job or session comes back naming the identifier
+// and carrying a `solution` ("Job not found. Job ID: da24...", "Verify the job ID is correct"),
+// which reaches the user as a good message on its own. A missing device or log answers with a bare
+// "device not found" that names nothing. This adds the value the user actually supplied, and where
+// to look, only in that second case: an error that already names the value or carries a solution is
+// returned untouched, and IBM's own wording is always kept.
+export function explainTerseError(
+	error: unknown,
+	subject: string,
+	value: string,
+	hint: string,
+): unknown {
+	if (!(error instanceof NodeApiError)) return error;
+	// Only a 404 is about the value. Adding "check the name" to a 401, a 429 or a 500 would send the
+	// reader after the wrong thing: an expired token has nothing to do with the backend name.
+	if (String(error.httpCode) !== '404') return error;
+	const original = (error.message ?? '').trim();
+	// Whether IBM named the value is the whole test. Its good errors quote it ("Job not found.
+	// Job ID: da24..."), its terse ones do not. `description` cannot be used for this: n8n fills it
+	// with a generic "Request failed with status code 404" whenever IBM supplies no solution.
+	if (original === '' || original.includes(value)) return error;
+	error.message = `${subject} "${value}": ${original}. ${hint}`;
+	return error;
+}
+
 // Wrap a request error as a NodeApiError, surfacing the IBM error message when the response
 // carried one. The message is passed as a constructor option so n8n does not overwrite it with
 // the generic httpCode default. Extraction runs on the raw error because that is where n8n put

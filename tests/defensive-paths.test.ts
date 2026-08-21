@@ -4,11 +4,12 @@ import { describe, expect, it } from 'vitest';
 import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
 import {
 	extractJobStatus,
+	handleCircuitBuild,
 	handleJob,
 	isZlibBase64,
 	mergePrimitiveOptions,
 } from '../nodes/IbmQuantum/operations';
-import { parseSamplerPub } from '../nodes/IbmQuantum/results';
+import { parseResults, parseSamplerPub } from '../nodes/IbmQuantum/results';
 import { asNodeError, errorMessage } from '../nodes/IbmQuantum/transport';
 import { fakeNode, makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
@@ -59,9 +60,41 @@ describe('parseSamplerPub without a usable register', () => {
 		});
 	});
 
-	it('falls back to the first register with samples when the preferred one has none', () => {
+	// Returning another register's counts under the requested name is worse than failing, so a pub
+	// that lacks the requested register reads its own but says so. The error for a name no pub
+	// carries is raised by parseResults, which is the only caller that sees every pub.
+	it('marks a fallback rather than passing another register off as the requested one', () => {
 		const data = { empty: { num_bits: 2 }, c: { num_bits: 1, samples: ['0x1'] } };
-		expect(parseSamplerPub(data, 'empty')).toMatchObject({ register: 'c', shots: 1 });
+		expect(parseSamplerPub(data, 'empty')).toMatchObject({
+			register: 'c',
+			requestedRegister: 'empty',
+			registerFallback: true,
+		});
+	});
+
+	it('reports zero shots when the pub carries no register with samples at all', () => {
+		expect(parseSamplerPub({ empty: { num_bits: 2 } }, 'c')).toEqual({
+			register: null,
+			counts: {},
+			shots: 0,
+		});
+	});
+
+	it('still auto-selects when no register was requested', () => {
+		const data = { empty: { num_bits: 2 }, c: { num_bits: 1, samples: ['0x1'] } };
+		expect(parseSamplerPub(data)).toMatchObject({ register: 'c', shots: 1 });
+	});
+
+	it('uses the requested register when it does carry samples', () => {
+		const data = {
+			meas: { num_bits: 2, samples: ['0x1'] },
+			syndrome: { num_bits: 3, samples: ['0x5', '0x5'] },
+		};
+		expect(parseSamplerPub(data, 'syndrome')).toMatchObject({
+			register: 'syndrome',
+			shots: 2,
+			counts: { '101': 2 },
+		});
 	});
 });
 
@@ -208,5 +241,124 @@ describe('isZlibBase64', () => {
 
 	it('rejects a header whose checksum does not divide by 31', () => {
 		expect(isZlibBase64(Buffer.from([0x78, 0x00, 0, 0]).toString('base64'))).toBe(false);
+	});
+});
+
+// A job can hold several pubs, and different circuits can name their classical registers
+// differently. The node itself submits one pub, but Get Results reads any job, including one
+// submitted from Qiskit.
+describe('a requested register across several pubs', () => {
+	const twoPubs = {
+		results: [
+			{ data: { meas: { samples: ['0x1'], num_bits: 1 } }, metadata: {} },
+			{ data: { syndrome: { samples: ['0x3'], num_bits: 2 } }, metadata: {} },
+		],
+	};
+
+	it('reads the requested register where it exists and falls back where it does not', () => {
+		const parsed = parseResults(twoPubs, 'meas');
+		const pubs = parsed.pubs as Array<Record<string, unknown>>;
+		expect(pubs[0].register).toBe('meas');
+		expect(pubs[0]).not.toHaveProperty('registerFallback');
+		expect(pubs[1].register).toBe('syndrome');
+		expect(pubs[1].registerFallback).toBe(true);
+		expect(pubs[1].requestedRegister).toBe('meas');
+	});
+
+	it('raises only when no pub carries the register, listing all of them', () => {
+		expect(() => parseResults(twoPubs, 'nope')).toThrow(
+			/Register "nope" is not in this result\. Available: meas, syndrome\./,
+		);
+	});
+
+	it('still raises for a single pub that does not carry it', () => {
+		expect(() => parseResults({ results: [twoPubs.results[0]] }, 'syndrome')).toThrow(
+			/Available: meas\./,
+		);
+	});
+
+	it('leaves the output untouched when no register is requested', () => {
+		const pubs = parseResults(twoPubs).pubs as Array<Record<string, unknown>>;
+		expect(pubs.map((p) => p.register)).toEqual(['meas', 'syndrome']);
+		expect(pubs[0]).not.toHaveProperty('registerFallback');
+		expect(pubs[1]).not.toHaveProperty('registerFallback');
+	});
+
+	// A pub with no data key at all must not break the scan that collects the register names.
+	it('skips a pub that carries no data while scanning for the register', () => {
+		const mixed = { results: [{ metadata: {} }, twoPubs.results[0]] };
+		const pubs = parseResults(mixed, 'meas').pubs as Array<Record<string, unknown>>;
+		expect(pubs).toHaveLength(2);
+		expect(pubs[1].register).toBe('meas');
+	});
+
+	it('ignores a register name on an estimator-only result', () => {
+		const parsed = parseResults({ results: [{ data: { evs: 1 }, metadata: {} }] }, 'meas');
+		expect((parsed.pubs as Array<Record<string, unknown>>)[0].type).toBe('estimator');
+	});
+});
+
+// num_bits comes from the response. A huge value made padStart throw "Invalid string length", a
+// raw RangeError with nothing in it to tell the user what happened.
+describe('a register width the response cannot justify', () => {
+	const twoSamples = (numBits?: unknown) => ({
+		c: { samples: ['0x1', '0x3'], ...(numBits === undefined ? {} : { num_bits: numBits }) },
+	});
+
+	it.each([[1e9], [-5], [1.5], [4097], ['3'], [null], [Number.NaN], [Number.POSITIVE_INFINITY]])(
+		'falls back to the measured width for num_bits %s',
+		(given) => {
+			const parsed = parseSamplerPub(twoSamples(given));
+			expect(parsed.numBits).toBe(2);
+			expect(parsed.counts).toEqual({ '11': 1, '01': 1 });
+		},
+	);
+
+	it('trusts a plausible width', () => {
+		expect(parseSamplerPub(twoSamples(4)).numBits).toBe(4);
+		expect(parseSamplerPub(twoSamples(4)).counts).toEqual({ '0011': 1, '0001': 1 });
+	});
+
+	it('trusts the widest register the builder can produce', () => {
+		expect(parseSamplerPub(twoSamples(4096)).numBits).toBe(4096);
+	});
+
+	it('measures the width when num_bits is absent', () => {
+		expect(parseSamplerPub(twoSamples()).numBits).toBe(2);
+	});
+});
+
+// getNodeParameter's fallback only applies when the parameter is absent, so an expression that
+// resolved to null went straight through and the first field read threw a raw TypeError.
+describe('a collection parameter an expression did not resolve to an object', () => {
+	const listJobs = (listFilters: unknown) => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { listFilters, limit: 5 },
+			http: () => ({ jobs: [] }),
+		});
+		return handleJob.call(ctx, TEST_CTX, 'list', 0).then(() => requests);
+	};
+
+	it.each([[null], [undefined], ['text'], [42], [[]], [true]])(
+		'treats %s as no filters instead of throwing',
+		async (given) => {
+			const requests = await listJobs(given);
+			expect(requests[0].qs).toEqual({ limit: 5, exclude_params: true });
+		},
+	);
+
+	it('still applies a real filter object', async () => {
+		const requests = await listJobs({ backend: 'ibm_kingston' });
+		expect(requests[0].qs).toEqual({
+			limit: 5,
+			exclude_params: true,
+			backend: 'ibm_kingston',
+		});
+	});
+
+	it('treats a null gate collection as an empty circuit', () => {
+		const { ctx } = makeExecuteContext({ params: { numQubits: 1, numClbits: 0, gates: null } });
+		const result = handleCircuitBuild.call(ctx, 0) as Record<string, unknown>;
+		expect(result.gateCount).toBe(0);
 	});
 });

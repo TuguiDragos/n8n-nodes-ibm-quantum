@@ -46,6 +46,25 @@ describe('validateGateInput', () => {
 		expect(validateGateInput('h', [1.5], [], undefined, 2, 2)).toMatch(/qubit index 1.5/);
 	});
 
+	// The range is half open: [0, numQubits). Asserting only far-out values let an off-by-one
+	// weakening (idx <= numQubits) survive untouched.
+	it('accepts the last valid index and rejects the first invalid one', () => {
+		expect(validateGateInput('h', [1], [], undefined, 2, 2)).toBeNull();
+		expect(validateGateInput('h', [2], [], undefined, 2, 2)).toMatch(/qubit index 2/);
+		expect(validateGateInput('h', [0], [], undefined, 1, 1)).toBeNull();
+		expect(validateGateInput('h', [1], [], undefined, 1, 1)).toMatch(/qubit index 1/);
+	});
+
+	it('applies the same boundary to a classical bit', () => {
+		expect(validateGateInput('measure', [0], [], 1, 2, 2)).toBeNull();
+		expect(validateGateInput('measure', [0], [], 2, 2, 2)).toMatch(/classical bit 2/);
+	});
+
+	it('applies the same boundary to barrier', () => {
+		expect(validateGateInput('barrier', [1], [], undefined, 2, 2)).toBeNull();
+		expect(validateGateInput('barrier', [2], [], undefined, 2, 2)).toMatch(/qubit index 2/);
+	});
+
 	it('rejects wrong parameter counts and non-finite parameters', () => {
 		expect(validateGateInput('rx', [0], [], undefined, 2, 2)).toMatch(/expects 1 parameter/);
 		expect(validateGateInput('u', [0], [0.1, 0.2], undefined, 2, 2)).toMatch(/expects 3 parameter/);
@@ -67,6 +86,43 @@ describe('validateGateInput', () => {
 	it('validates barrier indices when present', () => {
 		expect(validateGateInput('barrier', [0, 1], [], undefined, 2, 2)).toBeNull();
 		expect(validateGateInput('barrier', [9], [], undefined, 2, 2)).toMatch(/qubit index 9/);
+	});
+
+	// A repeated index reaches IBM as a queued job that fails with reason code 1603.
+	it('rejects a repeated qubit index on every multi-qubit gate', () => {
+		expect(validateGateInput('cx', [1, 1], [], undefined, 3, 3)).toMatch(
+			/uses qubit index 1 more than once/,
+		);
+		expect(validateGateInput('cz', [0, 0], [], undefined, 3, 3)).toMatch(/more than once/);
+		expect(validateGateInput('swap', [2, 2], [], undefined, 3, 3)).toMatch(/more than once/);
+		expect(validateGateInput('crx', [0, 0], [0.5], undefined, 3, 3)).toMatch(/more than once/);
+		expect(validateGateInput('cry', [1, 1], [0.5], undefined, 3, 3)).toMatch(/more than once/);
+		expect(validateGateInput('crz', [2, 2], [0.5], undefined, 3, 3)).toMatch(/more than once/);
+		expect(validateGateInput('ccx', [0, 0, 1], [], undefined, 3, 3)).toMatch(/more than once/);
+		expect(validateGateInput('ccx', [0, 1, 1], [], undefined, 3, 3)).toMatch(/more than once/);
+	});
+
+	it('names the first repeated index, not the last', () => {
+		expect(validateGateInput('ccx', [2, 0, 0], [], undefined, 3, 3)).toMatch(
+			/uses qubit index 0 more than once/,
+		);
+	});
+
+	it('still accepts distinct indices on every multi-qubit gate', () => {
+		expect(validateGateInput('cx', [0, 1], [], undefined, 3, 3)).toBeNull();
+		expect(validateGateInput('swap', [0, 2], [], undefined, 3, 3)).toBeNull();
+		expect(validateGateInput('ccx', [0, 1, 2], [], undefined, 3, 3)).toBeNull();
+		expect(validateGateInput('crz', [1, 2], [0.5], undefined, 3, 3)).toBeNull();
+	});
+
+	// barrier is a scheduling marker, so a repeated index changes nothing and Qiskit accepts it.
+	it('allows a repeated index on barrier', () => {
+		expect(validateGateInput('barrier', [0, 0, 1], [], undefined, 3, 3)).toBeNull();
+	});
+
+	// The range check runs first, so an out-of-range duplicate reports the range problem.
+	it('reports an out-of-range index before the duplicate check', () => {
+		expect(validateGateInput('cx', [9, 9], [], undefined, 3, 3)).toMatch(/qubit index 9/);
 	});
 });
 

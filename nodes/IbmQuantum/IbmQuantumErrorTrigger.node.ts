@@ -17,6 +17,10 @@ export class IbmQuantumErrorTrigger implements INodeType {
 		icon: { light: 'file:ibmQuantum.svg', dark: 'file:ibmQuantum.dark.svg' },
 		group: ['trigger'],
 		version: 1,
+		// Superseded by the main trigger's 'Failed or Canceled' option, which now emits the same
+		// reason fields. Hidden rather than removed so saved workflows keep polling, the way n8n
+		// retired Cron in favour of Schedule Trigger.
+		hidden: true,
 		subtitle: '=On {{$parameter["errorFilter"]}} jobs',
 		description:
 			'Starts the workflow when an IBM Quantum job fails or is canceled, with the failure reason and code',
@@ -32,7 +36,7 @@ export class IbmQuantumErrorTrigger implements INodeType {
 		credentials: [{ name: 'ibmQuantumApi', required: true }],
 		properties: [
 			{
-				displayName: 'On',
+				displayName: 'Trigger On',
 				name: 'errorFilter',
 				type: 'options',
 				options: [
@@ -41,7 +45,6 @@ export class IbmQuantumErrorTrigger implements INodeType {
 					{ name: 'Failed or Canceled', value: 'any' },
 				],
 				default: 'any',
-				description: 'Which failure status fires the trigger',
 			},
 			{
 				displayName: 'Jobs to Scan',
@@ -67,7 +70,8 @@ export class IbmQuantumErrorTrigger implements INodeType {
 
 	async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
 		const errorFilter = this.getNodeParameter('errorFilter', 'any') as string;
-		const limit = this.getNodeParameter('limit', 50) as number;
+		// pollJobs clamps this: the UI maxValue is a hint an expression can ignore.
+		const limit = this.getNodeParameter('limit', 50);
 		const tagFilters = parseCsvList(this.getNodeParameter('tagFilter', ''));
 		return pollJobs(
 			this,

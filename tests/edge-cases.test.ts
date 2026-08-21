@@ -56,6 +56,38 @@ describe('parseResults tolerates partial pubs', () => {
 });
 
 describe('isTransientPollError', () => {
+	// The fallback chain reads response.status, then statusCode, then httpCode, then cause.status.
+	// Asserting only "not transient" let every arm be satisfied by the value simply being absent.
+	it('reads the status from every source in the chain, not just the first', () => {
+		expect(isTransientPollError({ httpCode: 500 })).toBe(true);
+		expect(isTransientPollError({ statusCode: 502 })).toBe(true);
+		expect(isTransientPollError({ response: { status: 503 } })).toBe(true);
+		expect(isTransientPollError({ cause: { httpCode: 500 } })).toBe(true);
+		expect(isTransientPollError({ cause: { statusCode: 429 } })).toBe(true);
+		expect(isTransientPollError({ cause: { response: { status: 503 } } })).toBe(true);
+	});
+
+	// httpCode is read before statusCode, which is read before response.status. Pinning the order
+	// matters: a rewrite that reorders them would change which status a real axios error reports.
+	it('prefers the earlier source when two disagree', () => {
+		expect(isTransientPollError({ httpCode: 404, statusCode: 500 })).toBe(false);
+		expect(isTransientPollError({ httpCode: 500, statusCode: 404 })).toBe(true);
+		expect(isTransientPollError({ statusCode: 500, response: { status: 404 } })).toBe(true);
+		expect(isTransientPollError({ statusCode: 404, response: { status: 500 } })).toBe(false);
+	});
+
+	it('treats the 5xx boundary exactly', () => {
+		expect(isTransientPollError({ statusCode: 499 })).toBe(false);
+		expect(isTransientPollError({ statusCode: 500 })).toBe(true);
+		expect(isTransientPollError({ statusCode: 428 })).toBe(false);
+		expect(isTransientPollError({ statusCode: 429 })).toBe(true);
+		expect(isTransientPollError({ statusCode: 430 })).toBe(false);
+	});
+
+	it('ignores a network code once a real status is present', () => {
+		expect(isTransientPollError({ statusCode: 404, cause: { code: 'ECONNRESET' } })).toBe(false);
+	});
+
 	it('retries on 429 and 5xx, and gives up on 4xx', () => {
 		expect(isTransientPollError({ httpCode: '429' })).toBe(true);
 		expect(isTransientPollError({ httpCode: '503' })).toBe(true);

@@ -9,6 +9,7 @@ import {
 } from 'n8n-workflow';
 
 import { nodeProperties } from './descriptions';
+import { getBackends } from './loadOptions';
 import {
 	asNodeError,
 	checkApiVersion,
@@ -50,8 +51,10 @@ export class IbmQuantum implements INodeType {
 		// definitions and nothing else, so a link is reachable only if it sits in description text.
 		usableAsTool: {
 			replacements: {
+				// The agent does not read this by default: descriptionType is 'auto', so n8n builds the
+				// tool description per operation from its `action`. This is the node panel blurb.
 				description:
-					'Read and control IBM Quantum from an agent: list backends and pick the least busy one, read instance usage against the quota, check a job status, fetch results, and list jobs or workloads. Submitting a circuit needs an OpenQASM 3 string already transpiled for the target backend, because the Qiskit Runtime API does not transpile and rejects anything else, so submit only circuits supplied to you. Every operation, parameter, output shape and error code is documented at https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/llms-full.txt',
+					'Read and control IBM Quantum from an agent: list backends, check quota, submit transpiled circuits, and fetch job results',
 			},
 		},
 		hints: [
@@ -80,6 +83,13 @@ export class IbmQuantum implements INodeType {
 		properties: nodeProperties,
 	};
 
+	// Populates the Backend dropdowns. Every field keeps its plain-string value, so a
+	// workflow saved before this existed still resolves, and the expression toggle still
+	// takes a typed name when the list cannot be loaded.
+	methods = {
+		loadOptions: { getBackends },
+	};
+
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
@@ -94,10 +104,19 @@ export class IbmQuantum implements INodeType {
 
 				let result: IDataObject;
 				if (resource === 'circuit') {
-					result =
-						operation === 'import'
-							? handleCircuitImport.call(this, i)
-							: handleCircuitBuild.call(this, i);
+					// Named explicitly for the same reason as the resource guard below: an unknown
+					// operation must not quietly fall through to Build.
+					if (operation === 'import') {
+						result = handleCircuitImport.call(this, i);
+					} else if (operation === 'build') {
+						result = handleCircuitBuild.call(this, i);
+					} else {
+						throw new NodeOperationError(
+							this.getNode(),
+							`Unsupported circuit operation: ${operation}`,
+							{ itemIndex: i },
+						);
+					}
 				} else {
 					if (ctx === null) {
 						const credentials = await this.getCredentials('ibmQuantumApi');

@@ -8,7 +8,7 @@ import {
 } from 'n8n-workflow';
 
 import { extractJobStatus, isTerminalStatus, parseCsvList } from './operations';
-import { pollJobs } from './triggerPoll';
+import { isErrorStatus, pollJobs, withErrorDetails } from './triggerPoll';
 
 // Decide whether a job in the given status should fire the trigger.
 export function jobMatchesFilter(status: string, statusFilter: string): boolean {
@@ -17,6 +17,8 @@ export function jobMatchesFilter(status: string, statusFilter: string): boolean 
 	if (statusFilter === 'canceled') return status.startsWith('cancel');
 	// The defensive 'error' alias counts as failed, matching the error trigger's behavior.
 	if (statusFilter === 'failed') return status === 'failed' || status === 'error';
+	// Shares the error trigger's matcher so the two can never diverge.
+	if (statusFilter === 'failedOrCanceled') return isErrorStatus(status, 'any');
 	return status === statusFilter;
 }
 
@@ -27,9 +29,10 @@ export class IbmQuantumTrigger implements INodeType {
 		icon: { light: 'file:ibmQuantum.svg', dark: 'file:ibmQuantum.dark.svg' },
 		group: ['trigger'],
 		version: 1,
-		subtitle: '=Polling for {{$parameter["statusFilter"]}} jobs',
+		subtitle:
+			'=Polling for {{ $parameter["statusFilter"] === "failedOrCanceled" ? "failed or canceled" : $parameter["statusFilter"] }} jobs',
 		description:
-			'Starts the workflow when an IBM Quantum job finishes (completed, failed or canceled)',
+			'Run quantum circuits on IBM Quantum hardware, retrieve results and usage, and start a workflow when a job finishes',
 		documentationUrl: 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme',
 		defaults: { name: 'IBM Quantum Trigger' },
 		polling: true,
@@ -42,17 +45,21 @@ export class IbmQuantumTrigger implements INodeType {
 		credentials: [{ name: 'ibmQuantumApi', required: true }],
 		properties: [
 			{
-				displayName: 'Status',
+				displayName: 'Trigger On',
 				name: 'statusFilter',
 				type: 'options',
 				options: [
-					{ name: 'Any Terminal (Completed, Failed or Canceled)', value: 'any' },
+					{
+						name: 'Any Terminal (Completed, Failed or Canceled)',
+						value: 'any',
+						action: 'On any terminal state',
+					},
 					{ name: 'Canceled', value: 'canceled' },
 					{ name: 'Completed', value: 'completed' },
 					{ name: 'Failed', value: 'failed' },
+					{ name: 'Failed or Canceled', value: 'failedOrCanceled' },
 				],
 				default: 'any',
-				description: 'Which finished-job status fires the trigger',
 			},
 			{
 				displayName: 'Jobs to Scan',
@@ -78,13 +85,14 @@ export class IbmQuantumTrigger implements INodeType {
 
 	async poll(this: IPollFunctions): Promise<INodeExecutionData[][] | null> {
 		const statusFilter = this.getNodeParameter('statusFilter', 'any') as string;
-		const limit = this.getNodeParameter('limit', 50) as number;
+		// pollJobs clamps this: the UI maxValue is a hint an expression can ignore.
+		const limit = this.getNodeParameter('limit', 50);
 		const tagFilters = parseCsvList(this.getNodeParameter('tagFilter', ''));
 		return pollJobs(
 			this,
 			limit,
 			(job: IDataObject) => jobMatchesFilter(extractJobStatus(job), statusFilter),
-			(job: IDataObject) => job,
+			withErrorDetails,
 			tagFilters.length > 0 ? { tags: tagFilters } : {},
 		);
 	}

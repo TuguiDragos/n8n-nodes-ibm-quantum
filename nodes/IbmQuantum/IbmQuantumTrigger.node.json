@@ -15,5 +15,5 @@
 			}
 		]
 	},
-	"alias": ["Quantum", "Qiskit", "QPU", "Job", "Completed", "Poll"]
+	"alias": ["Quantum", "Qiskit", "QPU", "Job", "Completed", "Failed", "Canceled", "Error", "Poll"]
 }

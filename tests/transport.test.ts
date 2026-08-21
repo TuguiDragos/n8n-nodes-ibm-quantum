@@ -1,7 +1,7 @@
 import { NodeApiError, type INode } from 'n8n-workflow';
 import { describe, expect, it } from 'vitest';
 
-import { enrichApiError, extractIbmError } from '../nodes/IbmQuantum/transport';
+import { enrichApiError, explainTerseError, extractIbmError } from '../nodes/IbmQuantum/transport';
 
 const NODE = { name: 'IBM Quantum', type: 'ibmQuantum', typeVersion: 1, position: [0, 0], parameters: {} } as unknown as INode;
 
@@ -103,5 +103,115 @@ describe('enrichApiError', () => {
 		const before = apiError.message;
 		const enriched = enrichApiError(NODE, apiError);
 		expect(enriched.message).toBe(before);
+	});
+});
+
+// IBM's 404 bodies are inconsistent. A missing job or session names the identifier and carries a
+// solution; a missing device or log answers with a bare "device not found" that names nothing.
+describe('explainTerseError', () => {
+	const wrap = (message: string, solution?: string, status = '404') =>
+		enrichApiError(
+			NODE,
+			Object.assign(new Error(`Request failed with status code ${status}`), {
+				httpCode: status,
+				context: { data: { errors: [{ code: 'not_found', message, ...(solution ? { solution } : {}) }] } },
+			}),
+		);
+
+	it('adds the value and where to look when IBM names neither', () => {
+		const error = explainTerseError(
+			wrap('device not found'),
+			'Backend',
+			'ibm_kingstn',
+			'Check the name against Backend > Get Many.',
+		) as NodeApiError;
+		expect(error.message).toBe(
+			'Backend "ibm_kingstn": device not found. Check the name against Backend > Get Many.',
+		);
+	});
+
+	it("keeps IBM's own wording inside the new message", () => {
+		const error = explainTerseError(wrap('logs not found'), 'Logs for job', 'job-1', 'Hint.') as NodeApiError;
+		expect(error.message).toContain('logs not found');
+		expect(error.message).toContain('job-1');
+	});
+
+	// n8n sets description to a generic "Request failed with status code 404" whenever IBM supplies
+	// no solution, so the decision cannot be based on description being present.
+	it('does not treat n8n generic description as an IBM solution', () => {
+		const wrapped = wrap('device not found');
+		expect(wrapped.description).toBeTruthy();
+		const error = explainTerseError(wrapped, 'Backend', 'ibm_x', 'Hint.') as NodeApiError;
+		expect(error.message).toContain('Backend "ibm_x"');
+	});
+
+	it('leaves a message that already names the value untouched', () => {
+		const original = 'Job not found. Job ID: da24eX';
+		const error = explainTerseError(
+			wrap(original, 'Verify the job ID is correct.'),
+			'Job',
+			'da24eX',
+			'Hint.',
+		) as NodeApiError;
+		expect(error.message).toBe(original);
+		expect(error.description).toBe('Verify the job ID is correct.');
+	});
+
+	// A NodeApiError built from an error with no message at all has nothing to enrich.
+	it('leaves an error with no message untouched', () => {
+		const empty = new NodeApiError(NODE, {} as never);
+		empty.message = '';
+		expect((explainTerseError(empty, 'Backend', 'x', 'Hint.') as NodeApiError).message).toBe('');
+	});
+
+	it('survives an error whose message property is missing entirely', () => {
+		const noMessage = wrap('device not found');
+		(noMessage as { message?: string }).message = undefined;
+		expect(explainTerseError(noMessage, 'Backend', 'x', 'Hint.')).toBe(noMessage);
+	});
+
+	it('returns anything that is not a node API error unchanged', () => {
+		const plain = new Error('boom');
+		expect(explainTerseError(plain, 'Backend', 'x', 'Hint.')).toBe(plain);
+		expect(explainTerseError(null, 'Backend', 'x', 'Hint.')).toBeNull();
+	});
+});
+
+// Only a missing resource is about the value the user typed. Telling someone to check the backend
+// name when their token expired sends them after the wrong thing.
+describe('explainTerseError only speaks about the value on a 404', () => {
+	const at = (status: string, message: string) =>
+		enrichApiError(
+			NODE,
+			Object.assign(new Error(`Request failed with status code ${status}`), {
+				httpCode: status,
+				context: { data: { errors: [{ code: 'x', message }] } },
+			}),
+		);
+
+	it.each([
+		['401', 'Token is expired'],
+		['403', 'Forbidden'],
+		['429', 'Too many requests'],
+		['500', 'Internal server error'],
+		['400', 'Bad request'],
+	])('leaves a %s untouched', (status, message) => {
+		const error = explainTerseError(
+			at(status, message),
+			'Backend',
+			'ibm_kingstn',
+			'Check the name.',
+		) as NodeApiError;
+		expect(error.message).toBe(message);
+	});
+
+	it('still enriches the 404 it exists for', () => {
+		const error = explainTerseError(
+			at('404', 'device not found'),
+			'Backend',
+			'ibm_kingstn',
+			'Check the name.',
+		) as NodeApiError;
+		expect(error.message).toBe('Backend "ibm_kingstn": device not found. Check the name.');
 	});
 });

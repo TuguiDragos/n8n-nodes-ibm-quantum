@@ -36,7 +36,7 @@ export class IbmQuantumApi implements ICredentialType {
 
 	icon = { light: 'file:ibmQuantum.svg', dark: 'file:ibmQuantum.dark.svg' } as const;
 
-	documentationUrl = 'https://quantum.cloud.ibm.com/docs/en/guides';
+	documentationUrl = 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#credentials';
 
 	properties: INodeProperties[] = [
 		{

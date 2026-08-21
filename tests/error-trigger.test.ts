@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import { IbmQuantumErrorTrigger } from '../nodes/IbmQuantum/IbmQuantumErrorTrigger.node';
 import { isTerminalStatus } from '../nodes/IbmQuantum/operations';
-import { extractStateError, isErrorStatus } from '../nodes/IbmQuantum/triggerPoll';
+import {
+	extractStateError,
+	isErrorStatus,
+	withErrorDetails,
+} from '../nodes/IbmQuantum/triggerPoll';
 
 describe('isTerminalStatus', () => {
 	it('recognises every finished status, including the ran-too-long cancellation', () => {
@@ -70,7 +74,11 @@ describe('extractStateError', () => {
 type ErrorJob = Record<string, unknown>;
 type PollResult = Array<Array<{ json: Record<string, unknown> }>> | null;
 
-function makeErrorContext(jobs: ErrorJob[], errorFilter = 'any', mode: 'trigger' | 'manual' = 'manual') {
+function makeErrorContext(
+	jobs: ErrorJob[],
+	errorFilter = 'any',
+	mode: 'trigger' | 'manual' = 'manual',
+) {
 	const defaults: Record<string, unknown> = { errorFilter, tagFilter: '', limit: 20 };
 	return {
 		getNodeParameter: (name: string) => defaults[name],
@@ -91,7 +99,12 @@ const errorPoll = (ctx: unknown) =>
 const failedJob = {
 	id: 'e1',
 	backend: 'ibm_kingston',
-	state: { status: 'Failed', reason: 'Calibration in progress', reason_code: 1517, reason_solution: 'Resubmit' },
+	state: {
+		status: 'Failed',
+		reason: 'Calibration in progress',
+		reason_code: 1517,
+		reason_solution: 'Resubmit',
+	},
 };
 
 describe('IbmQuantumErrorTrigger.poll wiring (TEST-08)', () => {
@@ -108,7 +121,9 @@ describe('IbmQuantumErrorTrigger.poll wiring (TEST-08)', () => {
 	});
 
 	it('never fires on a completed job', async () => {
-		const result = await errorPoll(makeErrorContext([{ id: 'ok', state: { status: 'Completed' } }]));
+		const result = await errorPoll(
+			makeErrorContext([{ id: 'ok', state: { status: 'Completed' } }]),
+		);
 		expect(result![0]).toHaveLength(0);
 	});
 
@@ -138,5 +153,56 @@ describe('IbmQuantumErrorTrigger.poll wiring (TEST-08)', () => {
 		jobs = [failedJob, ...jobs];
 		const fired = await errorPoll(ctx);
 		expect(fired![0][0].json.reasonCode).toBe(1517);
+	});
+});
+
+describe('withErrorDetails', () => {
+	it('keeps every original job field untouched', () => {
+		const job = {
+			id: 'job-9',
+			backend: 'ibm_kingston',
+			program: { id: 'sampler' },
+			state: { status: 'Failed', reason: 'Gate error', reason_code: 1517 },
+		};
+		const out = withErrorDetails(job);
+		expect(out.id).toBe('job-9');
+		expect(out.backend).toBe('ibm_kingston');
+		expect(out.program).toEqual({ id: 'sampler' });
+		expect(out.state).toBe(job.state);
+	});
+
+	it('lifts the failure details to the top level', () => {
+		const out = withErrorDetails({
+			id: 'job-9',
+			state: {
+				status: 'Failed',
+				reason: 'Gate error',
+				reason_code: 1517,
+				reason_solution: 'Transpile first',
+			},
+		});
+		expect(out.reason).toBe('Gate error');
+		expect(out.reasonCode).toBe(1517);
+		expect(out.reasonSolution).toBe('Transpile first');
+	});
+
+	// A completed job carries no failure fields, and IBM leaves them out for cancellations too.
+	it('reports null rather than undefined when the job carries no failure', () => {
+		expect(withErrorDetails({ id: 'job-1', state: { status: 'Completed' } })).toMatchObject({
+			reason: null,
+			reasonCode: null,
+			reasonSolution: null,
+		});
+		expect(withErrorDetails({ id: 'job-1' })).toMatchObject({
+			reason: null,
+			reasonCode: null,
+			reasonSolution: null,
+		});
+	});
+
+	it('does not mutate the job it is given', () => {
+		const job = { id: 'job-1', state: { status: 'Failed', reason: 'boom' } };
+		withErrorDetails(job);
+		expect(job).toEqual({ id: 'job-1', state: { status: 'Failed', reason: 'boom' } });
 	});
 });

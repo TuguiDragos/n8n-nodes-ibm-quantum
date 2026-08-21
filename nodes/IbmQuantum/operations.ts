@@ -6,7 +6,13 @@ import {
 	type INode,
 } from 'n8n-workflow';
 
-import { asNodeError, errorMessage, ibmQuantumApiRequest, type RequestContext } from './transport';
+import {
+	asNodeError,
+	errorMessage,
+	explainTerseError,
+	ibmQuantumApiRequest,
+	type RequestContext,
+} from './transport';
 import { buildQasm3, parseNumberListStrict, validateGateInput, type GateOperation } from './qasm3';
 import { parseResults } from './results';
 
@@ -40,6 +46,10 @@ function mapGate(gate: string, qubits: number[], params: number[], clbit?: numbe
 	return { gate, targets: qubits, controls: [], params };
 }
 
+// Far above any announced QPU (the largest today is 156 qubits), so this only stops a runaway
+// expression from emitting a register no backend can accept.
+export const MAX_REGISTER_SIZE = 4096;
+
 // The UI minimum is only a hint. An expression can inject any value, so validate register
 // sizes here and fail with a clear message instead of emitting an invalid program.
 function requireRegisterSize(
@@ -54,6 +64,137 @@ function requireRegisterSize(
 		throw new NodeOperationError(node, `${label} must be an integer of at least ${min}.`, {
 			itemIndex,
 		});
+	}
+	if (n > MAX_REGISTER_SIZE) {
+		throw new NodeOperationError(
+			node,
+			`${label} is ${n}, above the supported maximum of ${MAX_REGISTER_SIZE}.`,
+			{ itemIndex },
+		);
+	}
+	return n;
+}
+
+// A parameter the UI types as `string` still arrives as whatever an expression produced, so coerce
+// before any string method runs. Anything that is not text or a number becomes '' and is then
+// rejected by the caller, rather than throwing "value.trim is not a function".
+export function asTrimmedString(value: unknown): string {
+	return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+}
+
+// The Qubits and Parameters fields are comma-separated text, but the natural expressions to write
+// are `{{ [0, 1] }}` and `{{ 0 }}`. Both used to reach String.trim as a non-string and surface as
+// "value.trim is not a function", and a bare number silently parsed as an empty list, which then
+// failed with a confusing arity error.
+export function asNumberListInput(value: unknown): string {
+	if (Array.isArray(value)) return value.map((entry) => asTrimmedString(entry)).join(',');
+	return asTrimmedString(value);
+}
+
+// Identifiers land in the URL path. IBM serves its web app for `/jobs/` rather than returning an
+// error, so an empty one came back as 285 KB of HTML reported as a successful job status. Reject it
+// here instead of sending the request.
+function requireIdentifier(value: unknown, label: string, node: INode, itemIndex: number): string {
+	const text = asTrimmedString(value);
+	if (text === '') {
+		throw new NodeOperationError(node, `${label} is required and cannot be empty.`, { itemIndex });
+	}
+	if (DOTS_ONLY.test(text)) {
+		throw new NodeOperationError(node, `${label} "${text}" is not a valid identifier.`, {
+			itemIndex,
+		});
+	}
+	// An unpaired surrogate cannot be percent-encoded, so pathSegment would throw a bare URIError
+	// that reaches the user as "URI malformed" with nothing naming the parameter. Checked with a
+	// pattern rather than String.isWellFormed, which would require raising the tsconfig lib to
+	// es2024 for this one call.
+	if (UNPAIRED_SURROGATE.test(text)) {
+		throw new NodeOperationError(
+			node,
+			`${label} contains an unpaired surrogate and is not valid text.`,
+			{ itemIndex },
+		);
+	}
+	// Bounded so a runaway expression cannot build a multi-megabyte URL, since percent-encoding
+	// multiplies the length again. See MAX_IDENTIFIER_LENGTH for why the number is what it is.
+	const length = characterLength(text);
+	if (length > MAX_IDENTIFIER_LENGTH) {
+		throw new NodeOperationError(
+			node,
+			`${label} is ${length} characters, longer than the ${MAX_IDENTIFIER_LENGTH} this node allows.`,
+			{ itemIndex },
+		);
+	}
+	return text;
+}
+
+// Encode anything that becomes one path segment. Without this a Job ID of `../backends` resolved to
+// a different endpoint, and the credential's bearer token and Service-CRN went along with it. The
+// node is also an AI Agent tool, so these identifiers can come straight from a model.
+export function pathSegment(value: string): string {
+	return encodeURIComponent(value);
+}
+
+// A segment of nothing but dots is removed by URL resolution: /api/v1/jobs/.. resolves to
+// /api/v1/. Encoding does not help, because a normaliser may decode %2E before removing dot
+// segments, which is what Node's URL does. Such a value is never a real identifier, so it is
+// refused instead. Anything else stays one segment once encodeURIComponent has escaped the
+// separators, so "../backends" is already safe as "..%2Fbackends".
+const DOTS_ONLY = /^\.+$/;
+
+// A high surrogate not followed by a low one, or a low surrogate not preceded by a high one.
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+// A safety bound against a runaway expression, not a mirror of the spec. The spec is not uniform:
+// the seven /jobs/{id} endpoints allow 1000, the four /backends/{id} ones and /sessions/{id}/close
+// allow 500, and GET and PATCH /sessions/{id} declare no bound at all. Taking the loosest documented
+// value means this never refuses something IBM would have accepted, while still stopping the
+// megabyte identifier that built a multi-megabyte URL. IBM enforces its own per-endpoint limits.
+export const MAX_IDENTIFIER_LENGTH = 1000;
+
+// A collection parameter reads as an object of set fields. getNodeParameter's fallback only applies
+// when the parameter is absent, so an expression resolving to null went straight through and the
+// first field read threw a raw TypeError. An array is rejected too: it has no named fields, so
+// treating it as a collection would silently read nothing.
+export function asCollection(value: unknown): IDataObject {
+	return value !== null && typeof value === 'object' && !Array.isArray(value)
+		? (value as IDataObject)
+		: {};
+}
+
+export interface NumberBounds {
+	min: number;
+	max?: number;
+	integer?: boolean;
+}
+
+// A numeric parameter that changes what IBM receives has to fail loudly rather than fall back. A
+// silent default here meant either the wrong backend (Minimum Qubits) or an error-mitigation
+// setting sent verbatim as a string (Resilience Level, Precision).
+export function requireBoundedNumber(
+	value: unknown,
+	label: string,
+	bounds: NumberBounds,
+	node: INode,
+	itemIndex: number,
+): number {
+	// Number(''), Number(null), Number([]) and Number(false) are all 0, so a parameter an expression
+	// left empty used to pass as a deliberate zero. That is not harmless: zero means no error
+	// mitigation for Resilience Level and no filter for Minimum Qubits. Only a real number, or text
+	// that is entirely a number, counts.
+	const isNumeric =
+		typeof value === 'number' ||
+		(typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value)));
+	const n = isNumeric ? Number(value) : Number.NaN;
+	const withinMax = bounds.max === undefined || n <= bounds.max;
+	const isWholeIfRequired = !bounds.integer || Number.isInteger(n);
+	if (!Number.isFinite(n) || !isWholeIfRequired || n < bounds.min || !withinMax) {
+		const kind = bounds.integer ? 'an integer' : 'a number';
+		const range =
+			bounds.max === undefined
+				? `at least ${bounds.min}`
+				: `between ${bounds.min} and ${bounds.max}`;
+		throw new NodeOperationError(node, `${label} must be ${kind} ${range}.`, { itemIndex });
 	}
 	return n;
 }
@@ -74,7 +215,7 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 		node,
 		itemIndex,
 	);
-	const gatesParam = this.getNodeParameter('gates', itemIndex, {}) as IDataObject;
+	const gatesParam = asCollection(this.getNodeParameter('gates', itemIndex, {}));
 	const rawGates = (gatesParam.gate as IDataObject[]) ?? [];
 
 	const gates = rawGates.map((raw, idx) => {
@@ -82,8 +223,8 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 		let qubits: number[];
 		let params: number[];
 		try {
-			qubits = parseNumberListStrict((raw.qubits as string) ?? '', 'Qubits');
-			params = parseNumberListStrict((raw.params as string) ?? '', 'Parameters');
+			qubits = parseNumberListStrict(asNumberListInput(raw.qubits), 'Qubits');
+			params = parseNumberListStrict(asNumberListInput(raw.params), 'Parameters');
 		} catch (error) {
 			const message = errorMessage(error);
 			throw new NodeOperationError(node, `Gate #${idx + 1} (${gate}): ${message}`, {
@@ -104,7 +245,13 @@ export function handleCircuitBuild(this: IExecuteFunctions, itemIndex: number): 
 
 // A real OpenQASM 3 version header, not just the substring somewhere in the text. Every valid
 // program declares one, so this is safe to require on any path that hands a circuit to IBM.
-const OPENQASM3_HEADER = /^\s*OPENQASM\s+3(\.\d+)?\s*;/m;
+// The leading run excludes line terminators on purpose. \s matches a newline, and under /m every
+// line start is another place to try from, so a run of newlines made this quadratic: 160k of them
+// blocked the event loop, and with it the whole n8n process, for 28 seconds. Excluding only the
+// four line terminators keeps it linear while still matching every other space character \s does,
+// which matters because a file saved with a UTF-8 BOM starts with U+FEFF and \s matches that.
+// Narrowing to [ \t] instead would have rejected 19 code points the original accepted.
+const OPENQASM3_HEADER = /^[^\S\n\r\u2028\u2029]*OPENQASM\s+3(\.\d+)?\s*;/m;
 
 function requireQasm3Header(qasm3: string, label: string, node: INode, itemIndex: number): void {
 	if (!OPENQASM3_HEADER.test(qasm3)) {
@@ -198,7 +345,13 @@ async function getLeastBusy(
 	ctx: RequestContext,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const minQubits = this.getNodeParameter('minQubits', itemIndex, 0) as number;
+	const minQubits = requireBoundedNumber(
+		this.getNodeParameter('minQubits', itemIndex, 0),
+		'Minimum Qubits',
+		{ min: 0, integer: true },
+		this.getNode(),
+		itemIndex,
+	);
 	const includeSimulators = this.getNodeParameter('includeSimulators', itemIndex, false) as boolean;
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'GET', '/backends');
@@ -241,20 +394,36 @@ export async function handleBackend(
 	if (operation === 'list') return ibmQuantumApiRequest.call(this, ctx, 'GET', '/backends');
 	if (operation === 'getLeastBusy') return getLeastBusy.call(this, ctx, itemIndex);
 
-	const backendName = this.getNodeParameter('backendName', itemIndex) as string;
+	const backendName = requireIdentifier(
+		this.getNodeParameter('backendName', itemIndex),
+		'Backend Name',
+		this.getNode(),
+		itemIndex,
+	);
 	const endpoints: Record<string, string> = {
-		getConfiguration: `/backends/${backendName}/configuration`,
-		getDefaults: `/backends/${backendName}/defaults`,
-		getProperties: `/backends/${backendName}/properties`,
-		getStatus: `/backends/${backendName}/status`,
+		getConfiguration: `/backends/${pathSegment(backendName)}/configuration`,
+		getDefaults: `/backends/${pathSegment(backendName)}/defaults`,
+		getProperties: `/backends/${pathSegment(backendName)}/properties`,
+		getStatus: `/backends/${pathSegment(backendName)}/status`,
 	};
-	const endpoint = endpoints[operation];
-	if (!endpoint) {
+	// hasOwn, not a truthiness check: `operation` reaches here as a raw string, and a name like
+	// 'toString' would otherwise resolve to an inherited Object member and pass as an endpoint.
+	const endpoint = Object.hasOwn(endpoints, operation) ? endpoints[operation] : undefined;
+	if (endpoint === undefined) {
 		throw new NodeOperationError(this.getNode(), `Unsupported backend operation: ${operation}`, {
 			itemIndex,
 		});
 	}
-	return ibmQuantumApiRequest.call(this, ctx, 'GET', endpoint);
+	try {
+		return await ibmQuantumApiRequest.call(this, ctx, 'GET', endpoint);
+	} catch (error) {
+		throw explainTerseError(
+			error,
+			'Backend',
+			backendName,
+			'Check the name against Backend > Get Many; names are lowercase, for example ibm_kingston.',
+		);
+	}
 }
 
 function parseJsonParameter(value: string, node: INode, label: string, itemIndex: number): unknown {
@@ -371,17 +540,98 @@ function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDat
 
 // Every program shares the same job envelope: which backend, which circuit, and the job-level
 // fields that sit beside params rather than inside it.
+// Every IBM device reports the same basis today (cz, id, rx, rz, rzz, sx, x), plus measure, reset,
+// delay and barrier among its supported instructions. Qiskit Runtime does NOT transpile: a circuit
+// using anything else is accepted, queued, and only then fails. The node cannot transpile either,
+// so it says so rather than letting the job fail minutes later.
+const ISA_INSTRUCTIONS = new Set([
+	'cz',
+	'id',
+	'rx',
+	'rz',
+	'rzz',
+	'sx',
+	'x',
+	'measure',
+	'reset',
+	'delay',
+	'barrier',
+]);
+
+// Read the instruction names out of an OpenQASM 3 program: the first identifier on each statement,
+// skipping the header, includes and declarations. Only used to warn, never to reject, so a name
+// this misses costs nothing.
+export function nonIsaInstructions(qasm3: string): string[] {
+	const found = new Set<string>();
+	// Only statements at the top level are instructions the device runs. Qiskit's exporter writes a
+	// definition block for anything outside stdgates, so a fully ISA circuit using rzz arrives with
+	// `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` in front of it. Reading those body lines
+	// reported `gate` and `cx` and told the user a correct circuit would fail.
+	let depth = 0;
+	for (const rawLine of qasm3.split('\n')) {
+		const line = rawLine.trim();
+		const opens = (line.match(/\{/g) ?? []).length;
+		const closes = (line.match(/\}/g) ?? []).length;
+		const wasInsideBlock = depth > 0;
+		depth += opens - closes;
+		if (depth < 0) depth = 0;
+		if (wasInsideBlock || opens > 0) continue;
+		if (!line || line.startsWith('//')) continue;
+		if (
+			/^(OPENQASM|include|qubit|bit|creg|qreg|let|const|input|output|gate|def|defcal|defcalgrammar|extern|cal)\b/.test(
+				line,
+			)
+		) {
+			continue;
+		}
+		// `c[0] = measure q[0];` puts the instruction after the assignment.
+		const statement = line.includes('=') ? line.slice(line.indexOf('=') + 1).trim() : line;
+		const name = statement.match(/^([A-Za-z_][A-Za-z0-9_]*)/)?.[1];
+		if (name && !ISA_INSTRUCTIONS.has(name)) found.add(name);
+	}
+	return [...found];
+}
+
+// Warn, never block. IBM accepts a non-ISA circuit, queues it, and fails it minutes later with an
+// opaque message, so saying it up front costs nothing and saves the wait. QPY is compressed, so
+// only an OpenQASM 3 program can be inspected.
+function isaWarnings(format: string, source: string, backend: string): string[] {
+	if (format === 'qpy') return [];
+	const offISA = nonIsaInstructions(source);
+	if (offISA.length === 0) return [];
+	const verb = offISA.length === 1 ? 'is' : 'are';
+	return [
+		`Circuit uses ${offISA.join(', ')}, which ${verb} not in the IBM basis (cz, id, rx, rz, rzz, sx, x). Qiskit Runtime does not transpile, so this job will most likely fail. Transpile the circuit for ${backend} before submitting.`,
+	];
+}
+
 function readSubmitEnvelope(
 	this: IExecuteFunctions,
 	itemIndex: number,
-): { backend: string; circuit: unknown; sessionId: string; body: IDataObject } {
-	const backend = this.getNodeParameter('backend', itemIndex) as string;
+): {
+	backend: string;
+	circuit: unknown;
+	sessionId: string;
+	body: IDataObject;
+	format: string;
+	source: string;
+} {
+	const backend = requireIdentifier(
+		this.getNodeParameter('backend', itemIndex),
+		'Backend',
+		this.getNode(),
+		itemIndex,
+	);
 	// A workflow saved before the format selector existed stores no circuitFormat, so the default
 	// keeps it on the OpenQASM 3 field it already filled in.
 	const format = this.getNodeParameter('circuitFormat', itemIndex, 'qasm3') as string;
 	const circuitParam = format === 'qpy' ? 'qpyCircuit' : 'qasm3';
-	const circuit = (this.getNodeParameter(circuitParam, itemIndex) as string) ?? '';
-	const sessionId = this.getNodeParameter('submitSessionId', itemIndex, '') as string;
+	const circuitValue = this.getNodeParameter(circuitParam, itemIndex);
+	const circuit = typeof circuitValue === 'string' ? circuitValue : asTrimmedString(circuitValue);
+	// Optional, so an empty value simply means no session. Coerced rather than required, because a
+	// numeric expression otherwise put session_id on the wire as a JSON number, where the schema
+	// asks for a string.
+	const sessionId = asTrimmedString(this.getNodeParameter('submitSessionId', itemIndex, ''));
 
 	requireSupportedCircuit(circuit, format, this.getNode(), itemIndex);
 	// QPY travels as the wrapper the official client sends, not as a bare string.
@@ -390,7 +640,11 @@ function readSubmitEnvelope(
 	const body: IDataObject = {};
 	// session_id is a sibling of program_id/backend/params, never inside params.
 	if (sessionId) body.session_id = sessionId;
-	const tags = parseCsvList(this.getNodeParameter('jobTags', itemIndex, '') as string);
+	const tags = requireJobTags(
+		this.getNodeParameter('jobTags', itemIndex, ''),
+		this.getNode(),
+		itemIndex,
+	);
 	if (tags.length > 0) body.tags = tags;
 	// The API expects the private flag only when set, matching the official client.
 	if (this.getNodeParameter('privateJob', itemIndex, false) === true) body.private = true;
@@ -404,7 +658,7 @@ function readSubmitEnvelope(
 	const logLevel = this.getNodeParameter('logLevel', itemIndex, '') as string;
 	if (logLevel) body.log_level = logLevel;
 
-	return { backend, circuit: payload, sessionId, body };
+	return { backend, circuit: payload, sessionId, body, format, source: circuit };
 }
 
 async function submitJob(
@@ -413,7 +667,10 @@ async function submitJob(
 	primitive: 'sampler' | 'estimator',
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const { backend, circuit, sessionId, body } = readSubmitEnvelope.call(this, itemIndex);
+	const { backend, circuit, sessionId, body, format, source } = readSubmitEnvelope.call(
+		this,
+		itemIndex,
+	);
 
 	// Parameters is a JSON field but an expression may resolve it to an object. Handle both, and
 	// treat empty string / {} as "no bindings" so a fixed circuit submits the same as before.
@@ -441,8 +698,22 @@ async function submitJob(
 			itemIndex,
 		);
 		validateObservables(observables, this.getNode(), itemIndex);
-		params.resilience_level = this.getNodeParameter('resilienceLevel', itemIndex, 1) as number;
-		const precision = this.getNodeParameter('precision', itemIndex, 0) as number;
+		// The spec bounds this to an integer in [0, 2]; anything else reached IBM verbatim.
+		params.resilience_level = requireBoundedNumber(
+			this.getNodeParameter('resilienceLevel', itemIndex, 1),
+			'Resilience Level',
+			{ min: 0, max: 2, integer: true },
+			this.getNode(),
+			itemIndex,
+		);
+		// Zero means "let IBM pick"; the spec otherwise requires a number strictly above zero.
+		const precision = requireBoundedNumber(
+			this.getNodeParameter('precision', itemIndex, 0),
+			'Precision',
+			{ min: 0 },
+			this.getNode(),
+			itemIndex,
+		);
 		pub = buildPubData('estimator', circuit, observables, parameters, 0, precision);
 	} else {
 		const shots = clampCount(this.getNodeParameter('shots', itemIndex, 1024), 1024);
@@ -456,8 +727,18 @@ async function submitJob(
 	body.backend = backend;
 	body.params = params;
 
+	const warnings = isaWarnings(format, source, backend);
+	for (const warning of warnings) this.logger.warn(warning);
+
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
-	return { jobId: response.id ?? null, backend, primitive, sessionId: sessionId || null, response };
+	return {
+		jobId: response.id ?? null,
+		backend,
+		primitive,
+		sessionId: sessionId || null,
+		...(warnings.length > 0 ? { warnings } : {}),
+		response,
+	};
 }
 
 // The noise learner characterises the noise on a backend's entangling layers. It takes bare
@@ -468,9 +749,12 @@ async function submitNoiseLearnerJob(
 	ctx: RequestContext,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const { backend, circuit, sessionId, body } = readSubmitEnvelope.call(this, itemIndex);
+	const { backend, circuit, sessionId, body, format, source } = readSubmitEnvelope.call(
+		this,
+		itemIndex,
+	);
 	const options = readAdditionalOptions.call(this, itemIndex);
-	const learner = this.getNodeParameter('noiseLearnerOptions', itemIndex, {}) as IDataObject;
+	const learner = asCollection(this.getNodeParameter('noiseLearnerOptions', itemIndex, {}));
 
 	const counts: Array<[string, string]> = [
 		['maxLayersToLearn', 'max_layers_to_learn'],
@@ -483,14 +767,24 @@ async function submitNoiseLearnerJob(
 		if (value > 0) options[key] = value;
 	}
 
-	const depthsInput = (learner.layerPairDepths as string) ?? '';
-	if (depthsInput.trim()) {
+	const depthsInput = asNumberListInput(learner.layerPairDepths);
+	if (depthsInput) {
 		let depths: number[];
 		try {
 			depths = parseNumberListStrict(depthsInput, 'Layer Pair Depths');
 		} catch (error) {
 			const message = errorMessage(error);
 			throw new NodeOperationError(this.getNode(), message, { itemIndex });
+		}
+		// The schema types these as integers. Without the check a fraction went through unchanged
+		// and Infinity reached IBM as JSON null, since JSON has no way to write it.
+		const notWhole = depths.find((depth) => !Number.isInteger(depth));
+		if (notWhole !== undefined) {
+			throw new NodeOperationError(
+				this.getNode(),
+				`Layer Pair Depths must be whole numbers; got ${notWhole}.`,
+				{ itemIndex },
+			);
 		}
 		options.layer_pair_depths = depths;
 	}
@@ -505,12 +799,16 @@ async function submitNoiseLearnerJob(
 	body.backend = backend;
 	body.params = params;
 
+	const warnings = isaWarnings(format, source, backend);
+	for (const warning of warnings) this.logger.warn(warning);
+
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
 	return {
 		jobId: response.id ?? null,
 		backend,
 		primitive: 'noise-learner',
 		sessionId: sessionId || null,
+		...(warnings.length > 0 ? { warnings } : {}),
 		response,
 	};
 }
@@ -518,11 +816,14 @@ async function submitNoiseLearnerJob(
 // Split a comma-separated input into clean values. Used for tags, and for the list filters the
 // analytics endpoints accept.
 export function parseCsvList(value: unknown): string[] {
-	if (typeof value !== 'string' || !value.trim()) return [];
-	return value
-		.split(',')
-		.map((tag) => tag.trim())
-		.filter((tag) => tag !== '');
+	// The UI field is comma-separated text, but `{{ $json.tags }}` hands over the array itself, which
+	// is the natural expression to write. Returning [] for it was silent data loss: Update Tags PUTs
+	// the full list, so an array input cleared every tag on the job. A number is coerced for the same
+	// reason. Anything else has no sensible reading and stays [].
+	const parts = Array.isArray(value)
+		? value.map((entry) => asTrimmedString(entry))
+		: asTrimmedString(value).split(',');
+	return parts.map((tag) => tag.trim()).filter((tag) => tag !== '');
 }
 
 // IBM V2 terminal statuses are completed, canceled and failed. The British spelling and 'error'
@@ -530,6 +831,53 @@ export function parseCsvList(value: unknown): string[] {
 export const TERMINAL = ['completed', 'cancelled', 'canceled', 'failed', 'error'];
 
 // The job carries both a state object and a top level status string. Read either.
+// IBM's schema bounds a job tag list to 8 entries of at most 86 characters. Exceeding either fails
+// the whole submit with a message that names neither the tag nor the bound, so check it here.
+export const MAX_JOB_TAGS = 8;
+export const MAX_JOB_TAG_LENGTH = 86;
+
+// String.length counts UTF-16 code units, so one emoji counts as two. JSON Schema maxLength and
+// minLength count characters, which is what IBM validates against, so an 86-emoji tag is legal and
+// a 2-emoji search term is too short. Spreading the string iterates by code point.
+export function characterLength(value: string): number {
+	return [...value].length;
+}
+
+function requireJobTags(value: unknown, node: INode, itemIndex: number): string[] {
+	// Update Tags PUTs the whole list, so an empty result deletes every tag on the job. Text and
+	// arrays can say that deliberately, and a number is one tag. Anything else means the expression
+	// did not resolve to a tag list, and wiping the job's tags is not a reasonable reading of that.
+	const isTagList =
+		typeof value === 'string' ||
+		typeof value === 'number' ||
+		Array.isArray(value) ||
+		value === undefined;
+	if (!isTagList) {
+		throw new NodeOperationError(
+			node,
+			'Tags must be text or a list. Leave it empty to remove every tag from the job.',
+			{ itemIndex },
+		);
+	}
+	const tags = parseCsvList(value);
+	if (tags.length > MAX_JOB_TAGS) {
+		throw new NodeOperationError(
+			node,
+			`Tags has ${tags.length} entries; IBM accepts at most ${MAX_JOB_TAGS}.`,
+			{ itemIndex },
+		);
+	}
+	const tooLong = tags.find((tag) => characterLength(tag) > MAX_JOB_TAG_LENGTH);
+	if (tooLong !== undefined) {
+		throw new NodeOperationError(
+			node,
+			`Tag "${[...tooLong].slice(0, 20).join('')}..." is ${characterLength(tooLong)} characters; IBM accepts at most ${MAX_JOB_TAG_LENGTH}.`,
+			{ itemIndex },
+		);
+	}
+	return tags;
+}
+
 export function extractJobStatus(jobInfo: IDataObject): string {
 	const state = jobInfo.state;
 	if (state && typeof state === 'object') {
@@ -543,6 +891,17 @@ export function extractJobStatus(jobInfo: IDataObject): string {
 
 // A job is finished if completed, failed, or any cancellation variant (the API also reports
 // "Cancelled - Ran too long", which TERMINAL does not list literally).
+// Read the failure details the API buries under state, defaulting to null when absent. Shared
+// so the trigger and Get Results can never report a failure differently.
+export function stateError(job: IDataObject): IDataObject {
+	const state = (job.state as IDataObject) ?? {};
+	return {
+		reason: state.reason ?? null,
+		reasonCode: state.reason_code ?? null,
+		reasonSolution: state.reason_solution ?? null,
+	};
+}
+
 export function isTerminalStatus(status: string): boolean {
 	return TERMINAL.includes(status) || status.startsWith('cancel');
 }
@@ -551,9 +910,17 @@ export function isTerminalStatus(status: string): boolean {
 // non-finite or below 1. The field's minValue is only a UI hint, so an expression can bypass it
 // with 0, a negative number, or a non-numeric value (NaN). Without this, pollInterval -> NaN
 // busy-loops the API and maxWait -> NaN makes the deadline NaN so the loop never times out.
-function clampSeconds(value: unknown, fallback: number): number {
+// setTimeout takes a 32 bit signed delay: anything above 2^31-1 ms fires after 1 ms instead of
+// waiting. Without an upper bound a poll interval past about 24.9 days therefore turned the wait
+// into no wait at all, and the loop hammered the API until the deadline. An hour between checks and
+// a day of waiting are both far beyond any real use and stay well inside that limit.
+export const MAX_POLL_INTERVAL_SECONDS = 3600;
+export const MAX_WAIT_SECONDS = 86400;
+
+function clampSeconds(value: unknown, fallback: number, max: number): number {
 	const n = Number(value);
-	return Number.isFinite(n) && n >= 1 ? n : fallback;
+	if (!Number.isFinite(n) || n < 1) return fallback;
+	return n > max ? max : n;
 }
 
 // Same reasoning as clampSeconds, for the fields that carry a plain count. minValue in the UI is
@@ -607,10 +974,23 @@ async function getResults(
 	ctx: RequestContext,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const jobId = this.getNodeParameter('jobId', itemIndex) as string;
-	const intervalSec = clampSeconds(this.getNodeParameter('pollInterval', itemIndex, 5), 5);
-	const maxWaitSec = clampSeconds(this.getNodeParameter('maxWait', itemIndex, 300), 300);
-	const registerName = this.getNodeParameter('registerName', itemIndex, '') as string;
+	const jobId = requireIdentifier(
+		this.getNodeParameter('jobId', itemIndex),
+		'Job ID',
+		this.getNode(),
+		itemIndex,
+	);
+	const intervalSec = clampSeconds(
+		this.getNodeParameter('pollInterval', itemIndex, 5),
+		5,
+		MAX_POLL_INTERVAL_SECONDS,
+	);
+	const maxWaitSec = clampSeconds(
+		this.getNodeParameter('maxWait', itemIndex, 300),
+		300,
+		MAX_WAIT_SECONDS,
+	);
+	const registerName = asTrimmedString(this.getNodeParameter('registerName', itemIndex, ''));
 
 	const deadline = Date.now() + maxWaitSec * 1000;
 	let status = '';
@@ -621,7 +1001,7 @@ async function getResults(
 	// of killing a poll that may already have waited many minutes.
 	while (true) {
 		try {
-			jobInfo = await ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}`);
+			jobInfo = await ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${pathSegment(jobId)}`);
 		} catch (error) {
 			const remaining = deadline - Date.now();
 			if (remaining <= 0 || !isTransientPollError(error)) {
@@ -638,11 +1018,42 @@ async function getResults(
 	}
 
 	if (!isTerminalStatus(status)) return { jobId, status, timedOut: true, job: jobInfo };
-	if (status !== 'completed') return { jobId, status, job: jobInfo };
+	if (status !== 'completed') {
+		// A job that failed or was cancelled has no results, and the reason sits two levels down in
+		// the raw body. Lift it next to the status so the failure is readable without digging, the
+		// same fields the trigger emits. The raw job stays untouched.
+		return {
+			jobId,
+			status,
+			...stateError(jobInfo),
+			job: jobInfo,
+		};
+	}
 
-	const results = await ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}/results`);
-	const parsed = parseResults(results, registerName || undefined);
-	return { jobId, status, ...parsed, raw: results };
+	const results = await ibmQuantumApiRequest.call(
+		this,
+		ctx,
+		'GET',
+		`/jobs/${pathSegment(jobId)}/results`,
+	);
+	let parsed: IDataObject;
+	try {
+		parsed = parseResults(results, registerName || undefined);
+	} catch (error) {
+		// parseResults raises a plain Error for a Register Name the result does not carry.
+		throw new NodeOperationError(this.getNode(), errorMessage(error), { itemIndex });
+	}
+	// IBM documents a 204 on this endpoint as "Job's final result not found". The transport turns
+	// that empty body into {}, which parses to zero pubs and used to read as a completed job that
+	// simply produced nothing. Saying which of the two it was costs one field.
+	const resultsMissing = !Array.isArray(results.results);
+	return {
+		jobId,
+		status,
+		...parsed,
+		...(resultsMissing ? { resultsAvailable: false } : {}),
+		raw: results,
+	};
 }
 
 export async function handleJob(
@@ -658,7 +1069,7 @@ export async function handleJob(
 	if (operation === 'list') {
 		// IBM caps GET /jobs at 200 and silently substitutes its default above that.
 		const limit = clampCount(this.getNodeParameter('limit', itemIndex, 50), 50, 200);
-		const filters = this.getNodeParameter('listFilters', itemIndex, {}) as IDataObject;
+		const filters = asCollection(this.getNodeParameter('listFilters', itemIndex, {}));
 		// exclude_params drops each job's circuit payload from the listing, matching the
 		// official client's default. The filter toggle brings it back when needed.
 		const qs: IDataObject = { limit, exclude_params: filters.includeParams !== true };
@@ -690,8 +1101,9 @@ export async function handleJob(
 		// field nor the limit, so the bound is enforced here instead. There is no way to ask for
 		// every tag: the endpoint always wants a term. `type` has one value today, so it is sent
 		// rather than offered.
-		const search = (this.getNodeParameter('tagSearch', itemIndex, '') as string).trim();
-		if (search.length < TAG_SEARCH_MIN || search.length > TAG_SEARCH_MAX) {
+		const search = asTrimmedString(this.getNodeParameter('tagSearch', itemIndex, ''));
+		const searchLength = characterLength(search);
+		if (searchLength < TAG_SEARCH_MIN || searchLength > TAG_SEARCH_MAX) {
 			throw new NodeOperationError(
 				this.getNode(),
 				`Search must be between ${TAG_SEARCH_MIN} and ${TAG_SEARCH_MAX} characters. IBM cannot list every tag, so a term is always required.`,
@@ -704,20 +1116,37 @@ export async function handleJob(
 		});
 	}
 
-	const jobId = this.getNodeParameter('jobId', itemIndex) as string;
+	const jobId = requireIdentifier(
+		this.getNodeParameter('jobId', itemIndex),
+		'Job ID',
+		this.getNode(),
+		itemIndex,
+	);
 	if (operation === 'getStatus')
-		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}`);
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${pathSegment(jobId)}`);
 	if (operation === 'getMetrics') {
-		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${jobId}/metrics`);
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/jobs/${pathSegment(jobId)}/metrics`);
 	}
 	if (operation === 'getLogs') {
 		// The logs endpoint returns plain text, not JSON, so wrap it for a structured item.
-		const response = (await ibmQuantumApiRequest.call(
-			this,
-			ctx,
-			'GET',
-			`/jobs/${jobId}/logs`,
-		)) as unknown;
+		let response: unknown;
+		try {
+			response = (await ibmQuantumApiRequest.call(
+				this,
+				ctx,
+				'GET',
+				`/jobs/${pathSegment(jobId)}/logs`,
+			)) as unknown;
+		} catch (error) {
+			// IBM answers a job with no log file with a bare "logs not found", which reads as if the
+			// job itself were missing.
+			throw explainTerseError(
+				error,
+				'Logs for job',
+				jobId,
+				'A job that failed before it started running usually has none; check Get Status for the reason.',
+			);
+		}
 		// Plain text comes back as a string. The transport turns an empty body into {}, which here
 		// means no logs rather than an object worth returning.
 		const body = response as IDataObject;
@@ -726,19 +1155,23 @@ export async function handleJob(
 		return { jobId, logs };
 	}
 	if (operation === 'updateTags') {
-		const tags = parseCsvList(this.getNodeParameter('jobTags', itemIndex, '') as string);
+		const tags = requireJobTags(
+			this.getNodeParameter('jobTags', itemIndex, ''),
+			this.getNode(),
+			itemIndex,
+		);
 		// PUT replaces the full tag list and returns 204, so an empty input clears all tags.
-		await ibmQuantumApiRequest.call(this, ctx, 'PUT', `/jobs/${jobId}/tags`, { tags });
+		await ibmQuantumApiRequest.call(this, ctx, 'PUT', `/jobs/${pathSegment(jobId)}/tags`, { tags });
 		return { jobId, tags };
 	}
 	if (operation === 'cancel') {
-		await ibmQuantumApiRequest.call(this, ctx, 'POST', `/jobs/${jobId}/cancel`);
+		await ibmQuantumApiRequest.call(this, ctx, 'POST', `/jobs/${pathSegment(jobId)}/cancel`);
 		return { jobId, cancelled: true };
 	}
 	// Destructive requests only run on an exact match. An unknown operation must fail loudly
 	// instead of falling through to a delete.
 	if (operation === 'delete') {
-		await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/jobs/${jobId}`);
+		await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/jobs/${pathSegment(jobId)}`);
 		return { jobId, deleted: true };
 	}
 	throw new NodeOperationError(this.getNode(), `Unsupported job operation: ${operation}`, {
@@ -756,7 +1189,12 @@ export async function handleSession(
 		// Version 2 renamed this parameter to sessionMode; version 1 workflows still store `mode`.
 		const modeParam = this.getNode().typeVersion >= 2 ? 'sessionMode' : 'mode';
 		const mode = this.getNodeParameter(modeParam, itemIndex, 'batch') as string;
-		const backend = this.getNodeParameter('sessionBackend', itemIndex) as string;
+		const backend = requireIdentifier(
+			this.getNodeParameter('sessionBackend', itemIndex),
+			'Backend',
+			this.getNode(),
+			itemIndex,
+		);
 		// Zero deliberately means "omit max_ttl and let IBM pick", so this coerces without
 		// substituting a fallback: anything not a positive number simply drops the field.
 		const maxTtl = Math.floor(Number(this.getNodeParameter('maxTtl', itemIndex, 28800)));
@@ -766,14 +1204,19 @@ export async function handleSession(
 		return { sessionId: response.id ?? null, mode, backend, response };
 	}
 
-	const sessionId = this.getNodeParameter('sessionId', itemIndex) as string;
+	const sessionId = requireIdentifier(
+		this.getNodeParameter('sessionId', itemIndex),
+		'Session ID',
+		this.getNode(),
+		itemIndex,
+	);
 	if (operation === 'get') {
-		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/sessions/${sessionId}`);
+		return ibmQuantumApiRequest.call(this, ctx, 'GET', `/sessions/${pathSegment(sessionId)}`);
 	}
 	if (operation === 'setAccepting') {
 		const acceptingJobs = this.getNodeParameter('acceptingJobs', itemIndex, true) as boolean;
 		// PATCH returns 204 with no body, so report the requested state.
-		await ibmQuantumApiRequest.call(this, ctx, 'PATCH', `/sessions/${sessionId}`, {
+		await ibmQuantumApiRequest.call(this, ctx, 'PATCH', `/sessions/${pathSegment(sessionId)}`, {
 			accepting_jobs: acceptingJobs,
 		});
 		return { sessionId, acceptingJobs };
@@ -781,7 +1224,12 @@ export async function handleSession(
 	// close: DELETE returns 204 with no body. Exact match only, so an unknown operation
 	// cannot close a session by accident.
 	if (operation === 'close') {
-		await ibmQuantumApiRequest.call(this, ctx, 'DELETE', `/sessions/${sessionId}/close`);
+		await ibmQuantumApiRequest.call(
+			this,
+			ctx,
+			'DELETE',
+			`/sessions/${pathSegment(sessionId)}/close`,
+		);
 		return { sessionId, closed: true };
 	}
 	throw new NodeOperationError(this.getNode(), `Unsupported session operation: ${operation}`, {
@@ -812,7 +1260,7 @@ export async function handleWorkload(
 		MAX_WORKLOAD_LIMIT,
 		MAX_WORKLOAD_LIMIT,
 	);
-	const filters = this.getNodeParameter('workloadFilters', itemIndex, {}) as IDataObject;
+	const filters = asCollection(this.getNodeParameter('workloadFilters', itemIndex, {}));
 	const qs: IDataObject = { limit };
 
 	const stringFilters: Array<[string, string]> = [
@@ -831,7 +1279,11 @@ export async function handleWorkload(
 
 	const tags = parseCsvList(filters.tags);
 	if (tags.length > 0) qs.tags = tags;
-	if (Array.isArray(filters.status) && filters.status.length > 0) qs.status = filters.status;
+	// The UI control is multiOptions, so it hands over an array, but an expression or an AI tool
+	// sends a string. Requiring an array dropped the filter silently, which returns every workload
+	// instead of the ones asked for. parseCsvList reads both shapes.
+	const statuses = parseCsvList(filters.status);
+	if (statuses.length > 0) qs.status = statuses;
 	qs.sort = typeof filters.sort === 'string' && filters.sort ? filters.sort : DEFAULT_WORKLOAD_SORT;
 
 	return ibmQuantumApiRequest.call(this, ctx, 'GET', '/workloads', undefined, qs);
@@ -846,7 +1298,7 @@ const ANALYTICS_ENDPOINTS: Record<string, string> = {
 // The three usage analytics endpoints take one shared filter set. List values go out as repeated
 // keys, the encoding transport already applies and the only one the API reads.
 function analyticsQuery(this: IExecuteFunctions, itemIndex: number): IDataObject {
-	const filters = this.getNodeParameter('analyticsFilters', itemIndex, {}) as IDataObject;
+	const filters = asCollection(this.getNodeParameter('analyticsFilters', itemIndex, {}));
 	const qs: IDataObject = {};
 
 	const listFilters: Array<[string, string]> = [
@@ -885,6 +1337,9 @@ export async function handleAccount(
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/usage');
 	}
 	if (operation === 'getConfiguration') {
+		// IBM marks GET and PUT /instances/configuration deprecated in the live OpenAPI spec, in
+		// favour of the Resource Controller API. Both still answer. Get Instance already reads the
+		// same fields from /instance, which is not deprecated, so prefer that for reads.
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/configuration');
 	}
 	if (operation === 'getInstance') {
@@ -897,8 +1352,11 @@ export async function handleAccount(
 	if (operation === 'getApiVersions') {
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/versions');
 	}
-	const analyticsEndpoint = ANALYTICS_ENDPOINTS[operation];
-	if (analyticsEndpoint) {
+	// See the note in handleBackend: an inherited Object member must not pass for an endpoint.
+	const analyticsEndpoint = Object.hasOwn(ANALYTICS_ENDPOINTS, operation)
+		? ANALYTICS_ENDPOINTS[operation]
+		: undefined;
+	if (analyticsEndpoint !== undefined) {
 		const qs = analyticsQuery.call(this, itemIndex);
 		if (operation === 'getAnalyticsGrouped') {
 			qs.group_by = this.getNodeParameter('groupBy', itemIndex, 'backend') as string;
@@ -908,9 +1366,19 @@ export async function handleAccount(
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', analyticsEndpoint, undefined, qs);
 	}
 	if (operation === 'setCostLimit') {
-		const requested = Math.floor(Number(this.getNodeParameter('instanceLimit', itemIndex, 0)));
+		// This write removes the spend cap when it sends null, so a value it cannot read must fail
+		// rather than fall through to that. 'abc', '', null and a negative all used to clear the cap
+		// silently, which is the opposite of what someone setting a limit intended.
+		const requested = requireBoundedNumber(
+			this.getNodeParameter('instanceLimit', itemIndex, 0),
+			'Cost Limit',
+			{ min: 0, integer: true },
+			this.getNode(),
+			itemIndex,
+		);
 		// Zero clears the limit, which the API expresses as an explicit null rather than an absent key.
-		const instanceLimit = Number.isFinite(requested) && requested > 0 ? requested : null;
+		const instanceLimit = requested > 0 ? requested : null;
+		// Deprecated by IBM alongside the GET above; there is no replacement write endpoint yet.
 		await ibmQuantumApiRequest.call(this, ctx, 'PUT', '/instances/configuration', {
 			instance_limit: instanceLimit,
 		});

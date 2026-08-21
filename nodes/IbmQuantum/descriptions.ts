@@ -61,31 +61,56 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'Get API Versions',
 				value: 'getApiVersions',
 				action: 'Get the API versions IBM currently serves',
+				description: 'List every IBM-API-Version and which one is still live',
 			},
 			{
 				name: 'Get Configuration',
 				value: 'getConfiguration',
 				action: 'Get the instance configuration',
+				description: 'Read the cost limit set on this instance',
 			},
-			{ name: 'Get Instance', value: 'getInstance', action: 'Get the current instance details' },
-			{ name: 'Get Usage', value: 'getUsage', action: 'Get instance usage and allocation' },
-			{ name: 'Get Usage Analytics', value: 'getAnalytics', action: 'Get usage analytics' },
+			{
+				name: 'Get Instance',
+				value: 'getInstance',
+				action: 'Get the current instance details',
+				description: 'Read the plan, limits and backends attached to this instance',
+			},
+			{
+				name: 'Get Usage',
+				value: 'getUsage',
+				action: 'Get instance usage and allocation',
+				description: 'Read seconds consumed against the quota for the current period',
+			},
+			{
+				name: 'Get Usage Analytics',
+				value: 'getAnalytics',
+				action: 'Get usage analytics',
+				description: 'Totals for jobs, sessions and seconds over a date range',
+			},
 			{
 				name: 'Get Usage Analytics Filters',
 				value: 'getAnalyticsFilters',
 				action: 'Get the filter values available for usage analytics',
+				description: 'The backend, plan and instance values the analytics filters accept',
 			},
 			{
 				name: 'Get Usage Analytics Grouped',
 				value: 'getAnalyticsGrouped',
 				action: 'Get usage analytics grouped by a key',
+				description: 'The same totals split by backend, plan, instance or user',
 			},
 			{
 				name: 'Get Usage Analytics Grouped by Date',
 				value: 'getAnalyticsByDate',
 				action: 'Get usage analytics grouped by date',
+				description: 'The same totals as a time series, one point per day',
 			},
-			{ name: 'Set Cost Limit', value: 'setCostLimit', action: 'Set the instance cost limit' },
+			{
+				name: 'Set Cost Limit',
+				value: 'setCostLimit',
+				action: 'Set the instance cost limit',
+				description: 'Cap the seconds this instance may consume, or clear the cap',
+			},
 		],
 		default: 'getUsage',
 	},
@@ -97,12 +122,42 @@ export const nodeProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['backend'] } },
 		options: [
-			{ name: 'Get Configuration', value: 'getConfiguration', action: 'Get backend configuration' },
-			{ name: 'Get Defaults', value: 'getDefaults', action: 'Get backend default settings' },
-			{ name: 'Get Least Busy', value: 'getLeastBusy', action: 'Get the least busy backend' },
-			{ name: 'Get Properties', value: 'getProperties', action: 'Get backend properties' },
-			{ name: 'Get Status', value: 'getStatus', action: 'Get backend status' },
-			{ name: 'List', value: 'list', action: 'List available backends' },
+			{
+				name: 'Get Configuration',
+				value: 'getConfiguration',
+				action: 'Get backend configuration',
+				description: 'Static device data: basis gates, coupling map and qubit count',
+			},
+			{
+				name: 'Get Defaults',
+				value: 'getDefaults',
+				action: 'Get backend default settings',
+				description: 'Pulse level defaults; many devices answer with an empty body',
+			},
+			{
+				name: 'Get Least Busy',
+				value: 'getLeastBusy',
+				action: 'Get the least busy backend',
+				description: 'Pick the online device with the shortest queue',
+			},
+			{
+				name: 'Get Many',
+				value: 'list',
+				action: 'Get many backends',
+				description: 'Every device on this instance, with status, qubits and queue',
+			},
+			{
+				name: 'Get Properties',
+				value: 'getProperties',
+				action: 'Get backend properties',
+				description: 'Calibration data: gate errors, readout errors and timings',
+			},
+			{
+				name: 'Get Status',
+				value: 'getStatus',
+				action: 'Get backend status',
+				description: 'Live availability, queue depth and any operator message',
+			},
 		],
 		default: 'list',
 	},
@@ -114,11 +169,17 @@ export const nodeProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['circuit'] } },
 		options: [
-			{ name: 'Build', value: 'build', action: 'Build a circuit from gates' },
+			{
+				name: 'Build',
+				value: 'build',
+				action: 'Build a circuit from gates',
+				description: 'Assemble an OpenQASM 3 program from a gate list, validated locally',
+			},
 			{
 				name: 'Import OpenQASM 3',
 				value: 'import',
 				action: 'Import an existing OPENQASM 3 circuit',
+				description: 'Pass an existing OpenQASM 3 program through, header checked',
 			},
 		],
 		default: 'build',
@@ -131,34 +192,78 @@ export const nodeProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['job'] } },
 		options: [
-			{ name: 'Cancel', value: 'cancel', action: 'Cancel a job' },
-			{ name: 'Delete', value: 'delete', action: 'Delete a job' },
-			{ name: 'Get Logs', value: 'getLogs', action: 'Get the logs of a job' },
-			{ name: 'Get Metrics', value: 'getMetrics', action: 'Get timing and usage metrics of a job' },
+			{
+				name: 'Cancel',
+				value: 'cancel',
+				action: 'Cancel a job',
+				description: 'Stop a queued or running job; queued jobs cost nothing',
+			},
+			{
+				name: 'Delete',
+				value: 'delete',
+				action: 'Delete a job',
+				description: 'Remove a job and its results permanently',
+			},
+			{
+				name: 'Get Logs',
+				value: 'getLogs',
+				action: 'Get the logs of a job',
+				description: 'Read whatever the program wrote to the job log',
+			},
+			{
+				name: 'Get Many',
+				value: 'list',
+				action: 'Get many jobs',
+				description: 'Recent jobs, newest first, without their circuit payloads',
+			},
+			{
+				name: 'Get Many Tags',
+				value: 'listTags',
+				action: 'Get many job tags',
+				description: 'Search the tags in use; the term must be 3 to 100 characters',
+			},
+			{
+				name: 'Get Metrics',
+				value: 'getMetrics',
+				action: 'Get timing and usage metrics of a job',
+				description: 'Timestamps, QPU seconds charged and execution time',
+			},
 			{
 				name: 'Get Results',
 				value: 'getResults',
 				action: 'Poll until the job finishes and retrieve its results',
+				description: 'Wait for a terminal state, then parse counts or expectation values',
 			},
-			{ name: 'Get Status', value: 'getStatus', action: 'Get the status of a job' },
-			{ name: 'List', value: 'list', action: 'List recent jobs' },
-			{ name: 'List Tags', value: 'listTags', action: 'List the tags used on jobs' },
+			{
+				name: 'Get Status',
+				value: 'getStatus',
+				action: 'Get the status of a job',
+				description: 'The current state of a job, with the failure reason when it has one',
+			},
 			{
 				name: 'Submit to Estimator',
 				value: 'submitEstimator',
-				action: 'Submit a circuit to the estimator primitive',
+				action: 'Submit an already transpiled ISA circuit to the estimator primitive',
+				description: 'Run a circuit and read expectation values of observables',
 			},
 			{
 				name: 'Submit to Noise Learner',
 				value: 'submitNoiseLearner',
-				action: 'Submit a circuit to the noise learner program',
+				action: 'Submit an already transpiled ISA circuit to the noise learner program',
+				description: 'Characterise the noise of a circuit layer',
 			},
 			{
 				name: 'Submit to Sampler',
 				value: 'submitSampler',
-				action: 'Submit a circuit to the sampler primitive',
+				action: 'Submit an already transpiled ISA circuit to the sampler primitive',
+				description: 'Run a circuit and read measurement counts',
 			},
-			{ name: 'Update Tags', value: 'updateTags', action: 'Replace the tags of a job' },
+			{
+				name: 'Update Tags',
+				value: 'updateTags',
+				action: 'Replace the tags of a job',
+				description: 'Replace the whole tag list on a job',
+			},
 		],
 		default: 'submitSampler',
 	},
@@ -170,13 +275,29 @@ export const nodeProperties: INodeProperties[] = [
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['session'] } },
 		options: [
-			{ name: 'Close', value: 'close', action: 'Close a session' },
-			{ name: 'Create', value: 'create', action: 'Create a session or batch' },
-			{ name: 'Get', value: 'get', action: 'Get a session' },
+			{
+				name: 'Close',
+				value: 'close',
+				action: 'Close a session',
+				description: 'Stop a session from accepting further jobs and end it',
+			},
+			{
+				name: 'Create',
+				value: 'create',
+				action: 'Create a session or batch',
+				description: 'Open a batch or dedicated session on one backend',
+			},
+			{
+				name: 'Get',
+				value: 'get',
+				action: 'Get a session',
+				description: 'Read a session state and its remaining time',
+			},
 			{
 				name: 'Set Accepting Jobs',
 				value: 'setAccepting',
 				action: 'Set whether the session accepts new jobs',
+				description: 'Turn job acceptance on or off without closing the session',
 			},
 		],
 		default: 'create',
@@ -215,7 +336,7 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'backend',
 				type: 'string',
 				default: '',
-				placeholder: 'ibm_kingston, ibm_fez',
+				placeholder: 'e.g. ibm_kingston, ibm_fez',
 				description: 'Only usage on these backends, comma-separated for several',
 			},
 			{
@@ -245,7 +366,7 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'plan',
 				type: 'string',
 				default: '',
-				placeholder: 'open, standard',
+				placeholder: 'e.g. open, standard',
 				description: 'Only usage on these plans, comma-separated for several',
 			},
 			{
@@ -288,7 +409,14 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'options',
 		noDataExpression: true,
 		displayOptions: { show: { resource: ['workload'] } },
-		options: [{ name: 'List', value: 'list', action: 'List jobs and sessions together' }],
+		options: [
+			{
+				name: 'Get Many',
+				value: 'list',
+				action: 'Get many workloads',
+				description: 'Jobs and sessions in one listing, with richer filters',
+			},
+		],
 		default: 'list',
 	},
 
@@ -311,11 +439,13 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['workload'], operation: ['list'] } },
 		options: [
 			{
-				displayName: 'Backend',
+				displayName: 'Backend Name or ID',
 				name: 'backend',
-				type: 'string',
+				type: 'options',
+				typeOptions: { loadOptionsMethod: 'getBackends' },
 				default: '',
-				description: 'Only workloads that ran on this backend',
+				description:
+					'Only workloads that ran on this backend. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Created After',
@@ -376,7 +506,7 @@ export const nodeProperties: INodeProperties[] = [
 				],
 				default: '-createdAt',
 				description:
-					'Order of the returned workloads. The node asks for newest first, matching Job List; the API on its own would return oldest first.',
+					'Order of the returned workloads. The node asks for newest first, matching Job Get Many; the API on its own would return oldest first.',
 			},
 			{
 				displayName: 'Status',
@@ -397,21 +527,21 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'tags',
 				type: 'string',
 				default: '',
-				placeholder: 'experiment-7, vqe',
+				placeholder: 'e.g. experiment-7, vqe',
 				description: 'Only workloads carrying these tags, comma-separated for several',
 			},
 		],
 	},
 
 	{
-		displayName: 'Backend Name',
+		displayName: 'Backend Name or ID',
 		name: 'backendName',
-		type: 'string',
+		type: 'options',
+		typeOptions: { loadOptionsMethod: 'getBackends' },
 		required: true,
 		default: '',
-		placeholder: 'ibm_kingston',
 		description:
-			'Name of the backend (a specific quantum device or simulator) to query, e.g. ibm_kingston. Use the Backend List operation to see available names.',
+			'Name of the backend (a specific quantum device or simulator) to query. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 		displayOptions: {
 			show: {
 				resource: ['backend'],
@@ -484,7 +614,7 @@ export const nodeProperties: INodeProperties[] = [
 						type: 'string',
 						required: true,
 						default: '',
-						placeholder: '0 or 0,1 or 0,1,2',
+						placeholder: 'e.g. 0 or 0,1 or 0,1,2',
 						description:
 							'Comma-separated qubit indices. For controlled gates the control comes first and the target last (e.g. 0,1 = control 0, target 1). Leave empty only for a full-width barrier.',
 					},
@@ -493,7 +623,7 @@ export const nodeProperties: INodeProperties[] = [
 						name: 'params',
 						type: 'string',
 						default: '',
-						placeholder: '1.5708 or 0.1,0.2,0.3',
+						placeholder: 'e.g. 1.5708 or 0.1,0.2,0.3',
 						description:
 							'Comma-separated angles in radians. One value for RX/RY/RZ/Phase/Controlled-R gates; exactly three (theta, phi, lambda) for the U gate.',
 						displayOptions: {
@@ -526,14 +656,14 @@ export const nodeProperties: INodeProperties[] = [
 	},
 
 	{
-		displayName: 'Backend',
+		displayName: 'Backend Name or ID',
 		name: 'backend',
-		type: 'string',
+		type: 'options',
+		typeOptions: { loadOptionsMethod: 'getBackends' },
 		required: true,
 		default: '',
-		placeholder: 'ibm_kingston',
 		description:
-			'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits.',
+			'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 	{
@@ -569,7 +699,7 @@ export const nodeProperties: INodeProperties[] = [
 		typeOptions: { rows: 4 },
 		required: true,
 		default: '',
-		placeholder: 'eJwL9Az2...',
+		placeholder: 'e.g. eJwL9Az2...',
 		description:
 			'Circuit to submit, as QPY that is zlib compressed and then base64 encoded, which is the form IBM decompresses on arrival. In Python: dump with qiskit.qpy.dump(circuit, buffer), then base64.b64encode(zlib.compress(buffer.getvalue())). Base64 of the raw QPY bytes is rejected. The circuit must already be transpiled (ISA) for the chosen backend.',
 		displayOptions: {
@@ -580,8 +710,8 @@ export const nodeProperties: INodeProperties[] = [
 		displayName: 'Parameters',
 		name: 'parameters',
 		type: 'json',
-		default: '',
-		placeholder: '{ "theta": 1.5708 }',
+		default: '{}',
+		placeholder: 'e.g. { "theta": 1.5708 }',
 		description:
 			'Optional bindings for a parametrized circuit, as a JSON object mapping parameter names to values (or arrays of values). Leave empty for a fixed circuit.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
@@ -676,9 +806,9 @@ export const nodeProperties: INodeProperties[] = [
 		name: 'jobTags',
 		type: 'string',
 		default: '',
-		placeholder: 'experiment-7, vqe',
+		placeholder: 'e.g. experiment-7, vqe',
 		description:
-			'Comma-separated tags stored on the job. Jobs can then be filtered by tag in the List operation and the triggers. On Update Tags an empty value clears all tags.',
+			'Comma-separated tags stored on the job. Jobs can then be filtered by tag in the Get Many operation and the triggers. On Update Tags an empty value clears all tags.',
 		displayOptions: { show: { resource: ['job'], operation: [...ALL_SUBMIT_OPS, 'updateTags'] } },
 	},
 	{
@@ -706,7 +836,7 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'string',
 		required: true,
 		default: '',
-		placeholder: 'experiment',
+		placeholder: 'e.g. experiment',
 		description:
 			'Substring the returned tags must contain, between 3 and 100 characters. IBM has no way to list every tag, so a term is always required.',
 		displayOptions: { show: { resource: ['job'], operation: ['listTags'] } },
@@ -724,7 +854,7 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'layerPairDepths',
 				type: 'string',
 				default: '',
-				placeholder: '0, 1, 2, 4, 16, 32',
+				placeholder: 'e.g. 0, 1, 2, 4, 16, 32',
 				description:
 					'Circuit depths, measured in number of gate pairs, to use in the learning experiments. Comma-separated.',
 			},
@@ -859,11 +989,13 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['job'], operation: ['list'] } },
 		options: [
 			{
-				displayName: 'Backend',
+				displayName: 'Backend Name or ID',
 				name: 'backend',
-				type: 'string',
+				type: 'options',
+				typeOptions: { loadOptionsMethod: 'getBackends' },
 				default: '',
-				description: 'Only jobs that ran on this backend',
+				description:
+					'Only jobs that ran on this backend. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 			},
 			{
 				displayName: 'Created After',
@@ -942,7 +1074,7 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'tag',
 				type: 'string',
 				default: '',
-				placeholder: 'experiment-7, vqe',
+				placeholder: 'e.g. experiment-7, vqe',
 				description:
 					'Only jobs carrying these tags. Comma-separated for several, up to the eight the API accepts. A job must carry all of them to match.',
 			},
@@ -977,13 +1109,14 @@ export const nodeProperties: INodeProperties[] = [
 		displayOptions: { show: { resource: ['session'], operation: ['create'], '@version': [2] } },
 	},
 	{
-		displayName: 'Backend',
+		displayName: 'Backend Name or ID',
 		name: 'sessionBackend',
-		type: 'string',
+		type: 'options',
+		typeOptions: { loadOptionsMethod: 'getBackends' },
 		required: true,
 		default: '',
-		placeholder: 'ibm_kingston',
-		description: 'Backend the session reserves for its jobs',
+		description:
+			'Backend the session reserves for its jobs. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 		displayOptions: { show: { resource: ['session'], operation: ['create'] } },
 	},
 	{

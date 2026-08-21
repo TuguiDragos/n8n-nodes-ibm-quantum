@@ -98,6 +98,13 @@ export function validateGateInput(
 	if (offender !== undefined) {
 		return `Gate '${gate}' references qubit index ${offender}; expected an integer in [0, ${numQubits}).`;
 	}
+	// A multi-qubit gate needs distinct qubits. IBM queues a program with a repeated index and only
+	// then fails it with reason code 1603 ("duplicate bit arguments"), which Qiskit's own parser
+	// raises. barrier is exempt and returned above: repeating an index there is harmless.
+	const repeated = qubits.find((idx, at) => qubits.indexOf(idx) !== at);
+	if (repeated !== undefined) {
+		return `Gate '${gate}' uses qubit index ${repeated} more than once; a multi-qubit gate needs distinct qubits.`;
+	}
 
 	const expectedParams = PARAM_ARITY[gate] ?? 0;
 	if (params.length !== expectedParams) {

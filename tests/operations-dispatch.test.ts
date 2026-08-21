@@ -370,10 +370,19 @@ describe('handleAccount endpoints (TEST-12)', () => {
 		expect(set.requests[0].body).toEqual({ instance_limit: 600 });
 		expect(result).toEqual({ instanceLimit: 600 });
 
-		for (const value of [0, -5, 'nonsense']) {
-			const cleared = makeExecuteContext({ params: { instanceLimit: value }, http: () => ({}) });
-			await handleAccount.call(cleared.ctx, TEST_CTX, 'setCostLimit', 0);
-			expect(cleared.requests[0].body).toEqual({ instance_limit: null });
+		// Zero is the documented way to clear the cap.
+		const cleared = makeExecuteContext({ params: { instanceLimit: 0 }, http: () => ({}) });
+		await handleAccount.call(cleared.ctx, TEST_CTX, 'setCostLimit', 0);
+		expect(cleared.requests[0].body).toEqual({ instance_limit: null });
+
+		// A value the node cannot read must not reach that same null, which would remove the cap
+		// the user was trying to set.
+		for (const value of [-5, 'nonsense']) {
+			const bad = makeExecuteContext({ params: { instanceLimit: value }, http: () => ({}) });
+			await expect(handleAccount.call(bad.ctx, TEST_CTX, 'setCostLimit', 0)).rejects.toThrow(
+				/Cost Limit must be an integer at least 0/,
+			);
+			expect(bad.requests).toHaveLength(0);
 		}
 	});
 });

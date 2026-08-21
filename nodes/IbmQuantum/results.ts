@@ -33,6 +33,10 @@ function inferNumBits(samples: string[]): number {
 	return max;
 }
 
+// The widest classical register worth trusting from a response. It matches the circuit builder's
+// own register cap, and is far above any real device.
+const MAX_REGISTER_BITS = 4096;
+
 // Bit order follows the classical register: c[0] is the right most bit.
 export function parseSamplerPub(data: IDataObject, preferredRegister?: string): IDataObject {
 	const registerNames = Object.keys(data);
@@ -40,10 +44,12 @@ export function parseSamplerPub(data: IDataObject, preferredRegister?: string): 
 		const register = data[name] as IDataObject | undefined;
 		return Boolean(register) && Array.isArray((register as IDataObject).samples);
 	};
-	const registerName =
-		preferredRegister && hasSamples(preferredRegister)
-			? preferredRegister
-			: registerNames.find(hasSamples);
+	// Asking for a register by name and silently getting a different one back is worse than an
+	// error: the counts look plausible and belong to the wrong bits. A pub that does not carry the
+	// requested register still reads its own, but says so, because a job can hold several pubs whose
+	// circuits name their registers differently. parseResults raises when NO pub carries it.
+	const usePreferred = Boolean(preferredRegister) && hasSamples(preferredRegister as string);
+	const registerName = usePreferred ? preferredRegister : registerNames.find(hasSamples);
 
 	// parseResults only calls this once it has proved some value in `data` carries a samples array,
 	// so this guard is for direct callers, which is also how it is tested.
@@ -52,7 +58,18 @@ export function parseSamplerPub(data: IDataObject, preferredRegister?: string): 
 	const register = data[registerName] as IDataObject;
 	// hasSamples already established this is an array, so no fallback is needed here.
 	const samples = register.samples as string[];
-	const numBits = (register.num_bits as number) ?? inferNumBits(samples);
+	// num_bits comes from the response, so it is only trusted when it is a plausible register width.
+	// A huge value made padStart throw "Invalid string length", a raw RangeError with nothing in it
+	// to tell the user what happened, and a negative one produced a nonsense width. Measuring the
+	// samples is the honest fallback in both cases.
+	const declared = register.num_bits;
+	const numBits =
+		typeof declared === 'number' &&
+		Number.isInteger(declared) &&
+		declared >= 0 &&
+		declared <= MAX_REGISTER_BITS
+			? declared
+			: inferNumBits(samples);
 	const counts = samplesToCounts(samples, numBits);
 
 	// A sample the hex parser cannot read is dropped rather than folded into a wrong bitstring,
@@ -68,6 +85,11 @@ export function parseSamplerPub(data: IDataObject, preferredRegister?: string): 
 		numBits,
 		shots: samples.length,
 		counts,
+		// Only present when a name was asked for and this pub does not have it, so a fallback can
+		// never pass for the register the caller requested.
+		...(preferredRegister && !usePreferred
+			? { requestedRegister: preferredRegister, registerFallback: true }
+			: {}),
 		...(unparsed > 0 ? { unparsedSamples: unparsed } : {}),
 	};
 }
@@ -77,6 +99,29 @@ export function parseResults(response: IDataObject, preferredRegister?: string):
 	// crashed with a bare TypeError; the caller still returns the untouched body as `raw`, so
 	// degrading to zero pubs loses nothing and keeps the failure readable.
 	const results = Array.isArray(response.results) ? (response.results as IDataObject[]) : [];
+
+	// The register check belongs here, where every pub is visible. A job can hold several pubs whose
+	// circuits name their registers differently, so a name missing from one pub is not an error as
+	// long as some pub carries it; a name no pub carries is.
+	if (preferredRegister) {
+		const registersInResult = new Set<string>();
+		for (const pub of results) {
+			const data = (pub.data as IDataObject) ?? {};
+			for (const [name, value] of Object.entries(data)) {
+				if (value && typeof value === 'object' && Array.isArray((value as IDataObject).samples)) {
+					registersInResult.add(name);
+				}
+			}
+		}
+		if (registersInResult.size > 0 && !registersInResult.has(preferredRegister)) {
+			throw new Error(
+				`Register "${preferredRegister}" is not in this result. Available: ${[
+					...registersInResult,
+				].join(', ')}.`,
+			);
+		}
+	}
+
 	const pubs = results.map((pub) => {
 		const data = (pub.data as IDataObject) ?? {};
 		const isSampler = Object.values(data).some(

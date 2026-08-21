@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { IbmQuantumTrigger } from '../nodes/IbmQuantum/IbmQuantumTrigger.node';
+import { MAX_POLL_LIMIT, SEEN_JOB_CURSOR } from '../nodes/IbmQuantum/triggerPoll';
 
 type Job = { id: string; status: string };
 type PollResult = Array<Array<{ json: Job }>> | null;
@@ -88,15 +89,51 @@ describe('IbmQuantumTrigger.poll deduplication', () => {
 		expect(staticData.seenJobIds).toBeUndefined();
 	});
 
-	it('caps the seen-id cursor at 500 entries (TEST-09)', async () => {
-		// A real poll window is <=200, so >500 in one poll is unreachable via the API; this only
-		// pins the slice(-500) bound so the cursor cannot grow without limit.
+	it('holds the scan window to the requested limit, whatever the server returns (TEST-09)', async () => {
+		// A server that ignores the limit and answers with 600 must not widen the window, because the
+		// window has to stay below the cursor size.
 		const jobs = Array.from({ length: 600 }, (_, i) => ({ id: `j${i}`, status: 'completed' }));
 		const staticData: Record<string, unknown> = {};
 		const { ctx } = makeContext({ jobs }, staticData);
 
 		await poll(ctx);
-		expect((staticData.seenJobIds as string[]).length).toBe(500);
+		const seen = staticData.seenJobIds as string[];
+		expect(seen).toHaveLength(20);
+		// The window is the head of the response, so the newest jobs are the ones remembered.
+		expect(seen[0]).toBe('j0');
+		expect(seen[19]).toBe('j19');
+	});
+
+	// This is the property that matters: a job already emitted must never be emitted again.
+	it('never re-emits a job on an identical follow-up poll (TEST-09)', async () => {
+		const jobs = Array.from({ length: 600 }, (_, i) => ({ id: `j${i}`, status: 'completed' }));
+		const staticData: Record<string, unknown> = {};
+		const { ctx } = makeContext({ jobs }, staticData);
+
+		await poll(ctx);
+		const second = await poll(ctx);
+		expect(second).toBeNull();
+	});
+
+	it('keeps the cursor below its cap so nothing falls off the window (TEST-09)', async () => {
+		expect(SEEN_JOB_CURSOR).toBeGreaterThan(MAX_POLL_LIMIT);
+	});
+
+	it('clamps a limit an expression pushed out of range (TEST-09)', async () => {
+		const cases: Array<[unknown, number]> = [
+			[600, MAX_POLL_LIMIT],
+			[1e9, MAX_POLL_LIMIT],
+			[-5, 50],
+			['abc', 50],
+			[0, 50],
+			[200, 200],
+			[25, 25],
+		];
+		for (const [given, expected] of cases) {
+			const { ctx, requests } = makeContext({ jobs: [] }, {}, 'manual', { limit: given });
+			await poll(ctx);
+			expect((requests[0].qs as Record<string, unknown>).limit).toBe(expected);
+		}
 	});
 
 	it('skips jobs with no id instead of collapsing them to one cursor entry (TEST-09)', async () => {
@@ -155,5 +192,37 @@ describe('IbmQuantumTrigger.poll response normalization (TEST-10)', () => {
 	it('reads jobs from a { workloads: [] } response', async () => {
 		const result = await poll(ctxWithResponse({ workloads: [{ id: 'b', status: 'failed' }] }));
 		expect(result![0][0].json.id).toBe('b');
+	});
+
+	// An empty body used to reach `response.jobs` as null and throw a bare TypeError, outside the
+	// error wrapper, on every poll. transport.ts guards the action node; this is the trigger's copy.
+	it('treats an empty body as no jobs instead of throwing', async () => {
+		for (const body of [null, undefined, '', 0]) {
+			const result = await poll(ctxWithResponse(body));
+			expect(result![0]).toHaveLength(0);
+		}
+	});
+
+	it('treats an empty body as no jobs in trigger mode too', async () => {
+		expect(await poll(ctxWithResponse(null, 'trigger'))).toBeNull();
+	});
+
+	// Reading .id off a null entry threw a raw TypeError outside the error wrapper, and a polling
+	// trigger would repeat it on every tick.
+	it('skips a null entry in the jobs array instead of throwing', async () => {
+		const result = await poll(
+			ctxWithResponse({ jobs: [null, { id: 'a', status: 'completed' }] }),
+		);
+		expect(result![0].map((item) => item.json.id)).toEqual(['a']);
+	});
+
+	it('survives a list of nothing but null entries', async () => {
+		const result = await poll(ctxWithResponse({ jobs: [null, undefined] }));
+		expect(result![0]).toHaveLength(0);
+	});
+
+	it('survives a response whose jobs key is not an array', async () => {
+		const result = await poll(ctxWithResponse({ jobs: 'nope' }));
+		expect(result![0]).toHaveLength(0);
 	});
 });

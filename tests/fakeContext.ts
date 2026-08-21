@@ -22,6 +22,12 @@ export interface FakeContextOptions {
 	typeVersion?: number;
 	// Return the response body for a request; receives the recorded call and its zero-based index.
 	http?: (call: HttpCall, callIndex: number) => unknown;
+	// n8n returns true here when the user ticked "Continue on Fail". Hardcoding false made the
+	// whole continue-on-fail path unreachable from the suite.
+	continueOnFail?: boolean;
+	// Per-item parameter values, keyed by item index; falls back to `params` when absent. Needed to
+	// drive the node with more than one input item.
+	itemParams?: Array<Record<string, unknown>>;
 }
 
 export const TEST_CTX = { baseUrl: 'https://quantum.cloud.ibm.com/api/v1' };
@@ -47,15 +53,20 @@ export function makeExecuteContext(opts: FakeContextOptions = {}): {
 
 	const ctx = {
 		getNode: () => node,
-		continueOnFail: () => false,
+		continueOnFail: () => opts.continueOnFail ?? false,
 		logger: { warn: () => {}, info: () => {}, debug: () => {}, error: () => {} },
 		getCredentials: async () =>
 			opts.credentials ?? { region: 'us-east', apiVersion: CURRENT_API_VERSION },
-		getNodeParameter: (name: string, _itemIndex?: number, fallback?: unknown) =>
-			name in params ? params[name] : fallback,
+		getNodeParameter: (name: string, itemIndex?: number, fallback?: unknown) => {
+			const perItem = opts.itemParams?.[itemIndex ?? 0];
+			if (perItem && name in perItem) return perItem[name];
+			return name in params ? params[name] : fallback;
+		},
 		helpers: {
-			httpRequestWithAuthentication: async (_credName: string, options: HttpCall) => {
-				requests.push(options);
+			// The credential name is recorded, not discarded: a wrong identifier in transport.ts or
+			// triggerPoll.ts would otherwise pass every test while failing at runtime.
+			httpRequestWithAuthentication: async (credName: string, options: HttpCall) => {
+				requests.push({ ...options, credentialName: credName });
 				return respond(options, requests.length - 1);
 			},
 		},
