@@ -71,7 +71,7 @@
 <text x="80" y="76" class="ui" font-size="23" font-weight="500" fill="#e9e9ed" letter-spacing="-0.3">Security policy</text>
 <text x="80" y="104" class="ui" font-size="14" fill="#8e91ad">Report privately. The API key never leaves n8n's encrypted store.</text>
 <g transform="translate(846 84)">
-  <text x="-12" y="-30" class="mono" font-size="10" fill="#5f6280" letter-spacing="0.4">n8n vault</text>
+  <text x="34" y="-30" text-anchor="middle" class="mono" font-size="10" fill="#5f6280" letter-spacing="0.4">n8n vault</text>
   <rect x="-12" y="-21" width="92" height="42" rx="11" fill="url(#vaultfill)" stroke="#343856" stroke-width="1.4"/>
   <rect x="-8.5" y="-17.5" width="85" height="35" rx="8" fill="none" stroke="#9184d9" stroke-opacity="0.14"/>
   <g stroke="#9184d9" stroke-opacity="0.1" stroke-width="1">

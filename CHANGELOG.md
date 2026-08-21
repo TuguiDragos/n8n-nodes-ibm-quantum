@@ -2,6 +2,303 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.5.0 (2026-08-21)
+
+### Fixed
+
+- **A multi-qubit gate can no longer use the same qubit twice.** `validateGateInput` checked arity,
+  range, parameters and the measure target, but never that a gate's indices were distinct. Typing
+  `0,0` into Qubits emitted `cx q[0], q[0];`, the node reported success with a job ID, IBM queued the
+  job and failed it about fifteen seconds later with reason code 1603, "duplicate bit arguments",
+  which is the error Qiskit's own parser raises. No QPU time was charged, so nothing was billed, but
+  the run reported success and the failure only surfaced through the Error Trigger. All seven
+  controlled gates were affected. `barrier` stays exempt, where a repeat is harmless.
+  *Found on live hardware, confirmed by submitting one job that cost zero seconds.*
+
+- **An empty required identifier is refused before the request.** With `jobId` empty the request was
+  `GET /api/v1/jobs/`, which IBM's edge answers with its web application: HTTP 200, 285 KB of
+  `text/html`, returned as a successful job status. An expression like `{{ $json.jobId }}` on an item
+  missing the field produces exactly that. `jobId`, `sessionId`, `backendName` and both backend
+  fields on submit and session create now fail with a message naming the parameter.
+  *Found on live hardware.*
+
+- **Every identifier is URL-encoded before it becomes a path segment.** There was no
+  `encodeURIComponent` anywhere in the package, and fifteen endpoints interpolated user input into
+  the path. Confirmed live: a Job ID of `../backends` returned the device list, a Session ID of
+  `../jobs` returned the job list, and `../../instances` escaped the `/v1` prefix entirely. The
+  blast radius included `DELETE /jobs/{id}` and `PUT /jobs/{id}/tags`, and the node is exposed as an
+  AI Agent tool, where these identifiers come from a model. *Found on live hardware.*
+
+- **The polling loop got 0.4.1's empty-body guard.** That release fixed `json: null` crashing a run,
+  but only in `transport.ts`. Both triggers build their own request, so an empty body still reached
+  `response.jobs` as null and threw a bare `TypeError` outside the error wrapper, on every poll. The
+  same guard now applies there, and the job list is checked for shape rather than for null, so a
+  `jobs` key that is not an array no longer crashes either.
+
+- **Resilience Level and Precision are validated instead of forwarded.** Both were read with a bare
+  `as number`, which has no runtime effect, while every other submit numeric went through a clamp.
+  An expression producing `'2'` sent a string, and `3` exceeded the 0 to 2 bound the OpenAPI spec
+  defines. Both now fail locally with a message naming the parameter and its range.
+
+- **A Register Name that does not match now fails.** `parseSamplerPub` fell back to the first
+  register carrying samples, so asking for `syndrome` and getting `meas` produced a plausible
+  distribution belonging to the wrong bits. It now raises an error listing the registers the result
+  does carry. Leaving the field empty still auto-detects.
+
+- **Minimum Qubits fails loudly rather than dropping the filter.** The guard was `minQubits > 0`, so
+  any non-numeric value made the whole condition false and Get Least Busy returned a device of any
+  size. The comment two lines above claimed the opposite behaviour. *Found on live hardware.*
+
+- **Trigger "Jobs to Scan" is clamped, and the dedupe cursor can no longer re-fire.** Both triggers
+  passed the value straight into the query. The scan window is now bounded to what was requested,
+  which is what keeps it below the 500-entry cursor and makes a second emission of an already
+  emitted job impossible, regardless of what the server returns.
+
+- **String parameters survive a non-string expression.** `tagSearch` and the noise learner's layer
+  pair depths called `.trim()` on whatever arrived, so a numeric expression produced
+  `value.trim is not a function` instead of a message naming the field.
+
+- **An operation named after an inherited Object member is rejected.** The backend and analytics
+  endpoint lookups used a truthiness check, so an operation called `toString` resolved to
+  `Object.prototype.toString` and was sent as the endpoint. The circuit resource gained the explicit
+  unsupported-operation guard the other resources already had, instead of falling through to Build.
+
+- **Job tags are bounded locally.** IBM's schema allows at most 8 tags of at most 86 characters, and
+  exceeding either failed the whole submit with a message naming neither.
+
+- **Register sizes have an upper bound.** `numQubits` of `1e7` emitted `qubit[10000000] q;`. The cap
+  is 4096, far above any announced device.
+
+- **The Error Trigger reports the status it matched on.** A job carrying only a top-level `status`
+  matched but was emitted with `status: ''`, because the matcher and the mapper read different
+  fields.
+
+- **The action node's codex `nodeVersion` goes back to `1.0`.** 0.4.0 set it to `2.0` to match the
+  node's `defaultVersion`, which is what the n8n review rejected, twice: `nodeVersion` belongs to the
+  codex schema and is always `1.0`. It never tracked the runtime version. n8n's own Code node ships
+  `version: [1, 2]` with `defaultVersion: 2` and codex `1.0`, and 399 of the 400 built-in codex files
+  use `1.0`. The value has no runtime effect, verified by reloading the node: categories, aliases and
+  documentation links all still resolve. A test now pins both codex versions on all three nodes.
+
+- **An expression that yields an array no longer clears every tag on a job.** The Tags field is
+  comma-separated text, but `{{ $json.tags }}` hands over the array itself, and `parseCsvList`
+  returned nothing for it. Update Tags PUTs the full list, so that silently deleted every tag on the
+  job, and both tag filters matched everything. Arrays and numbers are now read the same as text.
+
+- **Set Cost Limit can no longer remove the spend cap by accident.** The write sends null to clear
+  the limit, and `'abc'`, `''`, `null` and a negative all reached that null. Only a deliberate zero
+  clears it now; anything unreadable fails and names the parameter.
+
+- **The OpenQASM header check is linear again.** `^\s*` under the /m flag made every newline another
+  place to start from, so a run of them backtracked quadratically: 160k newlines blocked the Node
+  event loop, and with it the whole n8n process, for 28 seconds. Excluding only the four line
+  terminators from the leading run brings that to under a millisecond while still matching every
+  other character `\s` does. Narrowing it to `[ \t]` instead, which was the first attempt, would
+  have rejected 19 code points the original accepted, U+FEFF among them, so a circuit saved as UTF-8
+  with a byte order mark would have stopped importing.
+
+- **An empty numeric parameter is no longer a deliberate zero.** `Number('')`, `Number(null)`,
+  `Number([])` and `Number(false)` are all 0, so once these parameters started being coerced, an
+  expression that resolved to nothing would have shipped `resilience_level: 0`, which is no error
+  mitigation, on a paid submit. (Before the coercion the raw value went to IBM verbatim instead.)
+  Zero still works when it is actually chosen.
+
+- **The circuit builder takes the expressions people write.** `{{ [0, 1] }}` and `{{ 0 }}` in Qubits
+  or Parameters produced `value.trim is not a function`, the exact message the coercion helper exists
+  to remove, and a lone number parsed as an empty list and then failed on arity.
+
+- **Identifiers are bounded and validated as text.** A value of nothing but dots is refused, because
+  URL resolution removes such a segment and encoding does not help: Node decodes %2E before removing
+  dot segments. An unpaired surrogate is refused rather than throwing a bare URIError that read
+  "URI malformed". Length is capped at 1000 characters, so a runaway expression can no longer build a
+  multi-megabyte URL. The spec is not uniform here (1000 for the job endpoints, 500 for the backend
+  ones, none declared for a session), so the node takes the loosest value and lets IBM enforce the
+  rest, rather than refusing something IBM would have accepted.
+
+- **Lengths are counted in characters, not UTF-16 units.** The tag bounds added in this same pass
+  first measured `String.length`, which counts one emoji as two, so an 86-emoji tag would have been
+  refused as 172 characters and a 2-emoji search would have slipped past the 3-character guard into
+  the bare 400 the guard exists to prevent. JSON Schema counts characters, and so does this now.
+
+- **The Workload Status filter accepts a string.** The control is multiOptions, so it hands over an
+  array, but an expression or an AI tool sends text and the filter was dropped silently, returning
+  every workload instead of the ones asked for.
+
+- **Polling can no longer become a busy loop.** setTimeout takes a 32 bit delay, so a wait above
+  2^31-1 ms fires after 1 ms instead. An unbounded poll interval therefore hammered the API until the
+  deadline. Both the interval and the total wait now have upper bounds well inside that limit.
+
+- **Collections resolved to null no longer crash.** `getNodeParameter`'s fallback only applies when a
+  parameter is absent, so an expression returning null went straight through and the first field read
+  threw a raw TypeError. All five collections are coerced.
+
+- **A register width the response cannot justify is measured instead.** A `num_bits` of 1e9 made
+  padStart throw "Invalid string length"; the samples are measured in that case.
+
+- **A polling trigger survives a null entry in the jobs array**, and `layer_pair_depths` must be
+  whole numbers, since Infinity reached IBM as JSON null.
+
+- **Get Results tells a missing result from an empty one.** IBM documents a 204 as "Job's final
+  result not found", which the empty-body guard turned into a completed job with zero pubs.
+  `resultsAvailable: false` now marks that case.
+
+- **Documentation corrections.** The 0.4.1 changelog claimed `AGENTS.md` ships in the npm tarball; the
+  files allowlist excludes it. The README's Qiskit Transpiler Service link returned HTTP 410. The
+  monthly scan's comment claimed it lints against the current ruleset, while `npm ci` installs the
+  one the lockfile pins.
+
+### Added
+
+- **The Backend fields are dropdowns loaded from your account.** Five fields (Backend Name on the
+  backend operations, Backend on submit, Backend on session create, and the backend filters on the
+  job and workload listings) now populate from `GET /v1/backends` through a `loadOptions` method.
+  Labels carry the status and the queue depth, for example `ibm_kingston (online, 7 queued)`,
+  because that listing already returns both, so the dropdown costs one call and no extra endpoint.
+  The list is read when the node opens and again on **Refresh List** in the field menu, never on a
+  timer, so the status and queue in a label are a snapshot rather than a live reading; the tooltip
+  on all five fields says so. The stored value is still the bare name, so workflows saved before
+  this keep resolving, and the expression toggle still accepts a typed name when the list cannot
+  be loaded. n8n exempts any
+  value starting with `=` from option validation, and these fields declare no `validateType`, so a
+  name absent from the list is never rejected.
+
+
+- **A transpilation warning on every submit.** Qiskit Runtime does not transpile, so a circuit using
+  anything outside the IBM basis (cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier)
+  is accepted, queued, and only then fails, minutes later, with an opaque message. The submit
+  operations now read the OpenQASM 3 program and, when they find an instruction outside that set,
+  attach a `warnings` array to the output and write the same line to the node logger. It never
+  blocks: the job is still submitted. Gate definition blocks are skipped, because Qiskit's exporter
+  emits `gate rzz(p0) a, b { cx ...; }` for a perfectly valid ISA circuit and reading the body would
+  accuse a correct program. QPY is compressed, so it is not inspected.
+
+- **The failure reason on Get Results.** A job that failed or was cancelled now returns `reason`,
+  `reasonCode` and `reasonSolution` beside `status`, lifted out of `job.state`, which is where they
+  were buried. The same three fields the Error Trigger already emitted.
+
+- **`resultsAvailable: false` on Get Results.** IBM documents a 204 on the results endpoint as
+  "Job's final result not found". The empty-body guard turned that into a completed job with zero
+  pubs, indistinguishable from a real empty result set.
+
+- **`registerFallback` and `requestedRegister` on a sampler pub.** A job can hold several pubs whose
+  circuits name their classical registers differently. A pub that does not carry the requested
+  register reads its own and marks that it did, so a fallback can never pass for what was asked for.
+
+- **Context on IBM's terse 404s.** A missing job or session comes back naming the identifier and
+  carrying a solution, but a missing device or log answers with a bare "device not found" that names
+  nothing. Those two now carry the value the user supplied and where to check it, with IBM's own
+  wording kept inside the message. Only a 404 is treated this way: telling someone to check the
+  backend name when their token expired would send them after the wrong thing.
+
+### Changed
+
+- **The three submit actions say the circuit must already be transpiled.** With n8n's default
+  `descriptionType: 'auto'`, `getToolDescriptionForNode` builds an attached tool's description from
+  the operation's `action`, so `action` is the only text a model reads. It previously said "Submit a
+  circuit to the sampler primitive", which told an agent nothing about the one rule that sinks the
+  job. Confirmed the long `usableAsTool` blurb never reaches a model on either path: the agent
+  resolves the auto description, and n8n's own MCP server reports the base description, checked live
+  against the published 0.4.1. The `$fromAI` override n8n writes for a circuit field carries an
+  empty description, and `from-ai-parse-utils.js` attaches nothing when it is empty, so the
+  parameter reaches the model unannotated. The action now carries the constraint instead, so an
+  attached agent reads "Submit an already transpiled ISA circuit to the sampler primitive in IBM
+  Quantum". The other 31 actions were left alone: they read well to a human in the panel and carry
+  nothing a model needs to be warned about.
+
+- **The two triggers are now one.** The panel listed seven trigger entries built from two nodes, and
+  two of them were duplicates: "On failed" and "On failed only" matched identically on all fifteen
+  job statuses, as did "On canceled" and "On canceled only". The only thing separating each pair was
+  the output shape, which the panel does not show, so the choice was invisible. The main trigger
+  gains a **Failed or Canceled** option, the one filter it could not express, and its output now
+  carries `reason`, `reasonCode` and `reasonSolution` beside the untouched job. The fields are added,
+  not wrapped, and the job carries them only under `state`, so existing expressions are unaffected.
+  `IbmQuantumErrorTrigger` is marked `hidden`, not removed: it stays registered and saved workflows
+  keep polling, the way n8n retired Cron in favour of Schedule Trigger.
+- **The README no longer claims tooling picks up the `llms-full.txt` URL on its own.** It said the
+  codex file lists that URL "so tooling that reads node metadata finds it without being told", which
+  is false in both directions: n8n's `useNodeDocsUrl.ts` reads only `primaryDocumentation[0]`, the
+  README, and its MCP server passes on no documentation URL at all. The section now says to hand an
+  assistant the raw URL. Also dropped the release-pipeline paragraph, which described a maintainer
+  workflow rather than anything a user of the node needs, and moved the video and the articles from
+  the top of the page down to the end.
+
+- **The credential dialog's "Read our docs" link points at documentation about the credential.**
+  The credential class sent it to IBM's general guides index, which documents none of the four
+  fields on that screen, while the codex already sent the node panel to this package's Credentials
+  section. The two agree now, and a test keeps them agreeing.
+
+- **The trigger subtitle no longer shows a camelCase value on the canvas.** The subtitle renders
+  the stored value, so the new `failedOrCanceled` option read as "Polling for failedOrCanceled
+  jobs" on the node. It is spelled out now, and a test refuses any option value that is not plain
+  lowercase unless the subtitle handles it, so the next option added cannot reintroduce this.
+- **The catch-all trigger option has a readable panel label.** n8n renders each entry as
+  `action ?? 'On ' + noCase(name)`, and `noCase` flattened "Any Terminal (Completed, Failed or
+  Canceled)" into a run-on phrase. The option now sets `action: 'On any terminal state'`, which
+  keeps the panel short while the dropdown inside the node keeps the explanatory wording.
+- **One implementation of the failure fields instead of three.** The trigger, Get Results and the
+  retired error trigger each lifted `reason`, `reasonCode` and `reasonSolution` out of the job's
+  `state` with their own copy of the same three lines. They now share `stateError` in
+  `operations.ts`, so a job that failed cannot be reported differently depending on which path
+  read it. Verified by mutation: emptying the shared helper fails 10 tests across both consumers.
+
+- **The Parameters field no longer opens with an error marker.** It is a `json` field and its
+  default was the empty string, which does not parse, so n8n's code editor flagged an optional
+  field before the user had touched anything. The default is now `{}`. `submitJob` already treated
+  the empty string and `{}` identically, so no request changes.
+- **The AI tool blurb is 121 characters instead of 557.** It used to carry an operation list and a
+  raw documentation URL because it was assumed to be what a model reads. Two consumers were checked
+  and neither shows it: the AI Agent resolves n8n's default `descriptionType: 'auto'` through
+  `getToolDescriptionForNode`, which returns `<action> in IBM Quantum`, and n8n's own MCP server
+  reports the base description for every operation, confirmed live against the published 0.4.1.
+  What a model does receive is each parameter's own description, so the ISA constraint stays pinned
+  there and is now covered by a test.
+
+- **The trigger event parameter is labelled "Trigger On"**, the name n8n's UI guidelines specify, and
+  its tooltip is gone because the same guideline asks for none. n8n builds the Triggers list from a
+  property named Event, Events or Trigger On; ours were called Status and On, so the panel fell back
+  to a single unnamed placeholder instead of listing the options. Only the label changed, the stored
+  parameter names are untouched.
+- **The three listing operations are named "Get Many"**, which is what n8n's UX guidelines call the
+  standard listing operation, and Job "List Tags" is now "Get Many Tags". The stored values are
+  unchanged (`list`, `listTags`), so existing workflows keep working.
+- **Every operation now carries a description**, rendered under its name in the operation dropdown,
+  and example placeholders use the `e.g.` prefix the guidelines ask for.
+- **Both `/instances/configuration` calls are marked deprecated in the code.** IBM's live OpenAPI
+  spec flags GET and PUT on that path, in favour of the Resource Controller API. Both still answer.
+  Account Get Instance already reads the same fields from `/instance`, which is not deprecated.
+
+### Testing
+
+The suite goes from 276 to 616 tests, still at 100% statement, branch, function and line coverage.
+The new files cover ground that was unreachable before: `tests/input-guards.test.ts` for every
+parameter an expression can corrupt, `tests/node-execute.test.ts` for the node wrapper itself,
+`tests/isa-warning.test.ts` for the transpilation warning, and `tests/load-options.test.ts` for the
+backend dropdown, including the label fallbacks and the case where the listing is unusable.
+`tests/fakeContext.ts` now models `continueOnFail`, per-item parameters and the credential name,
+all three of which were hardcoded or discarded, which is why multi-item processing, `pairedItem`,
+the continue-on-fail path and the `@version` gate had no coverage despite the 100% figure. All four
+turned out to be correct; they are now pinned.
+
+### Dependencies
+
+- `n8n-workflow` 2.34.3 to 2.35.3, pinned exactly. The version on the `stable` tag; `latest` is
+  2.16.0 and a caret range would have allowed the 2.36.3 beta.
+- **A known advisory is left in place, deliberately.** `@n8n/utils` pins `nanoid` to an exact
+  `3.3.8`, which carries two denial-of-service advisories (GHSA-28wg-ghj8-5hjv and
+  GHSA-2v37-7h3g-55p8), so `npm audit` reports three high findings through `n8n-workflow`. Nothing
+  reaches a user: the published tarball declares no `dependencies` at all, only a peer on
+  `n8n-workflow`, which n8n strips at install, and the installed tree contains no copy of either
+  package. The two available fixes are both refused: `npm audit fix --force` moves `n8n-workflow`
+  to 2.36.3, which sits on the `beta` tag rather than `stable`, and an `overrides` entry is
+  rejected outright by the official ruleset (`@n8n/community-nodes/no-overrides-field`). It
+  resolves when `@n8n/utils` relaxes its pin.
+- `eslint-plugin-n8n-nodes-base` 1.16.7 to 2.0.0. The major is an ESLint API migration only; both
+  versions expose the same 132 rules with the same severities.
+- `vitest` and `@vitest/coverage-v8` 4.1.10 to 4.1.11.
+- `eslint` stays at 9.29.0 and `typescript` at 5.9.x, both deliberately. The verification scanner
+  pins eslint 9.29.0 exactly, and TypeScript 7 removes `moduleResolution: node10` and is rejected
+  outright by typescript-eslint, which fails the whole lint step.
+
 ## 0.4.1 (2026-08-18)
 
 A verification fix, 10 new operations across a 6th resource, and documentation written for machines
@@ -139,7 +436,8 @@ to 276 at 100% statement, branch, function and line coverage.
   the source: node type strings, every operation's internal parameter names and defaults, output
   shapes, the gate emission table, ISA and transpilation guidance, error codes, limits, and a
   runnable example workflow JSON (parse-checked in CI terms by a test). `AGENTS.md` covers the same
-  ground for agents changing the code rather than using it. All three ship in the npm tarball.
+  ground for agents changing the code rather than using it. The two llms files ship in the npm
+  tarball; `AGENTS.md` is repository-only, since it is about changing the code rather than using it.
 
 - **A monthly verification scan.** `scan.yml` runs the official scanner on a schedule and on demand.
   The ruleset moves independently of this repository and has now broken a compliant release once;
