@@ -30,5 +30,7 @@ polling because IBM exposes no webhooks; the free Open plan allows batch session
 - [IBM Quantum Platform documentation](https://quantum.cloud.ibm.com/docs): backends, primitives, plans and quotas
 - [n8n community nodes installation](https://docs.n8n.io/integrations/community-nodes/installation/): how to install the package in n8n
 - [OpenQASM 3 specification](https://openqasm.com/): the circuit format circuits travel in
+- [Article: the node is live on npm](https://tuguidragos.com/ibm-quantum-node-for-n8n/): the launch, the n8n verification, and what the three nodes do
 - [Article: running circuits on real IBM hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/): end-to-end Bell state on a real QPU, including transpilation
 - [Article: six defects a real QPU exposed](https://tuguidragos.com/six-defects-verified-n8n-node-ibm-quantum/): what live hardware testing found that unit tests could not
+- [Article: one circuit, two IBM error codes](https://tuguidragos.com/ibm-quantum-error-code-1506-1603/): why the same rejected program returns 1506 or 1603, which of the two names the cause, and what a failed job still costs

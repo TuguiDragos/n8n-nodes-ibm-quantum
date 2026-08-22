@@ -544,6 +544,7 @@ A full walkthrough: creating the credential, wiring the nodes and running a circ
 - [My IBM Quantum node for n8n is now live](https://tuguidragos.com/ibm-quantum-node-for-n8n/). The launch, the n8n verification, and what the 3 nodes do.
 - [Running Quantum Circuits on Real IBM Hardware from n8n](https://tuguidragos.com/quantum-circuits-ibm-hardware-n8n/). An end-to-end Bell state on a real QPU (ibm_kingston), including the transpilation step that trips up most first attempts.
 - [Six defects in a verified n8n node for IBM Quantum](https://tuguidragos.com/six-defects-verified-n8n-node-ibm-quantum/). What 121 seconds of real QPU time found that green tests and 98 percent coverage could not, including the identity gate that fails every job despite being listed as native, and why a failed circuit still costs you quota.
+- [One circuit, two IBM Quantum error codes: 1506 and 1603](https://tuguidragos.com/ibm-quantum-error-code-1506-1603/). The same rejected program submitted twenty times in a row came back eleven times as one code and nine times as the other, and the job metrics say why: one code arrives from validation in half a second, the other from execution two seconds later, and only one of them names the gate that caused it.
 
 <br>
 
