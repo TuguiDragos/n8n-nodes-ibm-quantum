@@ -728,42 +728,6 @@ describe('the circuit builder accepts what an expression produces', () => {
 	});
 });
 
-// Set Cost Limit removes the instance spend cap when it sends null. A value the node cannot read
-// must therefore fail rather than fall through to that, which is the opposite of the intent.
-describe('Set Cost Limit never clears the cap by accident', () => {
-	const setLimit = (instanceLimit: unknown) => {
-		const { ctx, requests } = makeExecuteContext({ params: { instanceLimit }, http: () => ({}) });
-		return { run: () => handleAccount.call(ctx, TEST_CTX, 'setCostLimit', 0), requests };
-	};
-
-	it.each([['abc'], [''], ['   '], [null], [-5], [1.5], [[]], [false], [{}]])(
-		'refuses %s instead of sending instance_limit null',
-		async (given) => {
-			const { run, requests } = setLimit(given);
-			await expect(run()).rejects.toThrow(/Cost Limit must be an integer at least 0/);
-			expect(requests).toHaveLength(0);
-		},
-	);
-
-	it('clears the cap only for a deliberate zero', async () => {
-		const { run, requests } = setLimit(0);
-		await run();
-		expect((requests[0] as HttpCall).body).toEqual({ instance_limit: null });
-	});
-
-	it('sets the cap for a positive value', async () => {
-		const { run, requests } = setLimit(600);
-		await run();
-		expect((requests[0] as HttpCall).body).toEqual({ instance_limit: 600 });
-	});
-
-	it('accepts numeric text from an expression', async () => {
-		const { run, requests } = setLimit('600');
-		await run();
-		expect((requests[0] as HttpCall).body).toEqual({ instance_limit: 600 });
-	});
-});
-
 // encodeURIComponent leaves a dot alone because it is unreserved, and URL resolution then removes
 // the segment: /api/v1/jobs/.. resolves to /api/v1/. Encoding does not help either, since Node's
 // URL decodes %2E before removing dot segments. Such a value is refused instead.

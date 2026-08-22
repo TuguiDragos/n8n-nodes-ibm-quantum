@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { handleJob } from '../nodes/IbmQuantum/operations';
+import { handleJob, MAX_CIRCUITS_PER_JOB } from '../nodes/IbmQuantum/operations';
 import { makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 const QASM = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nx q[0];';
@@ -297,5 +297,119 @@ describe('submit input validation (BUG-03, UX-01, TEST-11)', () => {
 		await expect(
 			submit('submitEstimator', { observables: '{"IIZII":1,"XIZZZ":2.3}' }),
 		).resolves.toBeDefined();
+	});
+});
+
+// One job carries a fixed overhead of roughly two QPU seconds on top of the circuits themselves,
+// measured repeatedly on ibm_fez. Submitting a list of circuits in one job pays that once rather
+// than once per circuit, which is the whole point of the array form.
+describe('a list of circuits becomes one job with several PUBs', () => {
+	const A = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nx q[0];';
+	const B = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\ncz q[0], q[1];';
+
+	it('keeps a single string as a single PUB, exactly as before', async () => {
+		const { body } = await submit('submitSampler', { shots: 256 });
+		expect((body.params as Record<string, unknown>).pubs).toEqual([[QASM, null, 256]]);
+	});
+
+	it('builds one PUB per circuit for the sampler', async () => {
+		const { body } = await submit('submitSampler', { qasm3: [A, B], shots: 256 });
+		expect((body.params as Record<string, unknown>).pubs).toEqual([
+			[A, null, 256],
+			[B, null, 256],
+		]);
+	});
+
+	// The observables, bindings and precision apply to every circuit in the list.
+	it('builds one PUB per circuit for the estimator', async () => {
+		const { body } = await submit('submitEstimator', {
+			qasm3: [A, B],
+			observables: '"ZZ"',
+			resilienceLevel: 0,
+		});
+		expect((body.params as Record<string, unknown>).pubs).toEqual([
+			[A, 'ZZ'],
+			[B, 'ZZ'],
+		]);
+	});
+
+	it('sends the whole list to the noise learner, which already takes an array', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { backend: 'ibm_kingston', qasm3: [A, B], noiseLearnerOptions: {} },
+			http: () => ({ id: 'job-9' }),
+		});
+		await handleJob.call(ctx, TEST_CTX, 'submitNoiseLearner', 0);
+		const params = (requests[0].body as Record<string, unknown>).params as Record<string, unknown>;
+		expect(params.circuits).toEqual([A, B]);
+	});
+
+	it('refuses an empty list rather than submitting a job that runs nothing', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { backend: 'ibm_kingston', qasm3: [] },
+			http: () => ({ id: 'job-9' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+			/Circuit list is empty/,
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	// The node's own bound, so an expression that resolves to a runaway array cannot build one
+	// enormous request.
+	it('refuses a list past the cap, naming both numbers', async () => {
+		const many = new Array(MAX_CIRCUITS_PER_JOB + 1).fill(A);
+		const { ctx, requests } = makeExecuteContext({
+			params: { backend: 'ibm_kingston', qasm3: many },
+			http: () => ({ id: 'job-9' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+			new RegExp(`${MAX_CIRCUITS_PER_JOB + 1} entries.*at most ${MAX_CIRCUITS_PER_JOB}`),
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('accepts a list exactly at the cap', async () => {
+		const many = new Array(MAX_CIRCUITS_PER_JOB).fill(A);
+		const { body } = await submit('submitSampler', { qasm3: many, shots: 16 });
+		expect((body.params as Record<string, unknown>).pubs).toHaveLength(MAX_CIRCUITS_PER_JOB);
+	});
+
+	// Every circuit is validated, not just the first, so a bad entry cannot ride along on a good one.
+	it('validates every entry, not only the first', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { backend: 'ibm_kingston', qasm3: [A, 'not a circuit'] },
+			http: () => ({ id: 'job-9' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow();
+		expect(requests).toHaveLength(0);
+	});
+
+	it('coerces a non-string entry the same way a single circuit is coerced', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { backend: 'ibm_kingston', qasm3: [A, { nope: true }] },
+			http: () => ({ id: 'job-9' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow();
+		expect(requests).toHaveLength(0);
+	});
+
+	// A batch of variants of one experiment would otherwise repeat the identical warning per entry.
+	it('reports each distinct warning once across the whole list', async () => {
+		const offIsa = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nswap q[0], q[1];';
+		const { result } = await submit('submitSampler', { qasm3: [offIsa, offIsa], shots: 16 });
+		expect((result as { warnings: string[] }).warnings).toHaveLength(1);
+	});
+
+	it('wraps every QPY entry, not just the first', async () => {
+		const { body } = await submit('submitSampler', {
+			circuitFormat: 'qpy',
+			qpyCircuit: ['eJwL9Az2dAn2dAYAC9gCVQ==', 'eJwL9Az2dAn2dAYAC9gCVQ=='],
+			shots: 16,
+		});
+		const pubs = (body.params as Record<string, unknown>).pubs as unknown[][];
+		expect(pubs).toHaveLength(2);
+		for (const pub of pubs) {
+			expect(pub[0]).toMatchObject({ __type__: 'QuantumCircuit' });
+		}
 	});
 });

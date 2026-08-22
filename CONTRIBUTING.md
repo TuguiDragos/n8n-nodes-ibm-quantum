@@ -43,7 +43,7 @@ Restart n8n, then search the nodes panel for "IBM Quantum". Every change needs a
 
 | command | what it does |
 | :-- | :-- |
-| `npm run lint` | ESLint over `package.json`, `nodes` and `credentials`, with both the n8n community-nodes ruleset and `eslint-plugin-n8n-nodes-base`. These are the rules the verification scanner applies to the source, but a clean lint on its own is not a clean scan; see below |
+| `npm run lint` | ESLint over `package.json`, `nodes` and `credentials`, with both the n8n community-nodes ruleset and `eslint-plugin-n8n-nodes-base`. It runs with `--max-warnings 0`, so a warning fails it: seven rules in that ruleset ship as `warn` rather than `error`, among them `no-dead-files`, and the scanner's own verdict counts only errors. These are the rules the verification scanner applies to the source, but a clean lint on its own is not a clean scan; see below |
 | `npm run format` | Prettier over `nodes` and `credentials`. `npm run format:check` is the same check without writing, and CI runs it |
 | `npm run build` | Compile TypeScript, then copy the icons and the codex `.node.json` files into `dist` |
 | `npm test` | Vitest, the full unit suite |

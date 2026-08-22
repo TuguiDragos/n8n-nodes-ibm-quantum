@@ -4,7 +4,202 @@ All notable changes to this package are documented in this file.
 
 ## 0.5.0 (2026-08-21)
 
+
+### Added
+
+- **Several circuits in one job.** The circuit field now accepts a list as well as a string: an
+  expression resolving to an array submits every circuit in a single job, one PUB each, sharing the
+  same shots, bindings, observables and precision. This matters because a job carries about two QPU
+  seconds of fixed overhead before it runs a gate, measured repeatedly on `ibm_fez`, so a batch of
+  five circuits costs that once rather than five times. A single string behaves exactly as before.
+  Every entry is validated, an empty list is refused, and the node caps a job at 100 circuits, which
+  is its own bound rather than IBM's, so a runaway expression cannot build one enormous request.
+  Warnings are reported once each across the whole list rather than repeated per circuit.
+
+- **A warning when a Noise Learner circuit carries a classical register.** Measured on `ibm_fez`: a
+  three-qubit circuit with `cz(0,1)` and `cz(1,2)` fails with "ClassicalRegister with name 'c'
+  appears in multiple layers with different sizes (3 != 2)" when the circuit builder's default two
+  classical bits are left in place, and completes with two learned layers when Number of Classical
+  Bits is set to zero. The learner never measures the circuit, so the register is only ever a
+  liability, and a single-layer circuit survives, which is what hides the problem until the circuit
+  grows. Since the default is what puts the register there, the submit now says so. The warning stays
+  silent below two entangling gates, because a second layer cannot exist without them and warning on
+  every single-layer circuit would be noise. QPY is skipped, for the same reason the ISA check skips it.
+
+- **The Backend fields are dropdowns loaded from your account.** Five fields (Backend Name on the
+  backend operations, Backend on submit, Backend on session create, and the backend filters on the
+  job and workload listings) now populate from `GET /v1/backends` through a `loadOptions` method.
+  Labels carry the status and the queue depth, for example `ibm_kingston (online, 7 queued)`,
+  because that listing already returns both, so the dropdown costs one call and no extra endpoint.
+  The list is read when the node opens and again on **Refresh List** in the field menu, never on a
+  timer, so the status and queue in a label are a snapshot rather than a live reading; the tooltip
+  on all five fields says so. The stored value is still the bare name, so workflows saved before
+  this keep resolving, and the expression toggle still accepts a typed name when the list cannot
+  be loaded. n8n exempts any
+  value starting with `=` from option validation, and these fields declare no `validateType`, so a
+  name absent from the list is never rejected.
+
+
+- **A transpilation warning on every submit.** Qiskit Runtime does not transpile, so a circuit using
+  anything outside the IBM basis (cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier)
+  is accepted, queued, and only then fails, minutes later, with an opaque message. The submit
+  operations now read the OpenQASM 3 program and, when they find an instruction outside that set,
+  attach a `warnings` array to the output and write the same line to the node logger. It never
+  blocks: the job is still submitted. Gate definition blocks are skipped, because Qiskit's exporter
+  emits `gate rzz(p0) a, b { cx ...; }` for a perfectly valid ISA circuit and reading the body would
+  accuse a correct program. QPY is compressed, so it is not inspected.
+
+- **The failure reason on Get Results.** A job that failed or was cancelled now returns `reason`,
+  `reasonCode` and `reasonSolution` beside `status`, lifted out of `job.state`, which is where they
+  were buried. The same three fields the Error Trigger already emitted.
+
+- **`resultsAvailable: false` on Get Results.** IBM documents a 204 on the results endpoint as
+  "Job's final result not found". The empty-body guard turned that into a completed job with zero
+  pubs, indistinguishable from a real empty result set.
+
+- **`registerFallback` and `requestedRegister` on a sampler pub.** A job can hold several pubs whose
+  circuits name their classical registers differently. A pub that does not carry the requested
+  register reads its own and marks that it did, so a fallback can never pass for what was asked for.
+
+- **Context on IBM's terse 404s.** A missing job or session comes back naming the identifier and
+  carrying a solution, but a missing device or log answers with a bare "device not found" that names
+  nothing. Those two now carry the value the user supplied and where to check it, with IBM's own
+  wording kept inside the message. Only a 404 is treated this way: telling someone to check the
+  backend name when their token expired would send them after the wrong thing.
+
+### Changed
+
+- **Lint refuses warnings, not just errors.** Seven of the rules in the official community-nodes
+  ruleset ship as `warn` rather than `error`, among them `no-dead-files`,
+  `resource-operation-pattern` and `node-registration-complete`, and the scanner's verdict is the
+  error count alone. eslint exits 0 when only warnings are present, so any of those could have
+  passed CI green and reached a human reviewer instead. The `lint` script now passes
+  `--max-warnings 0`. Nothing in the package currently warns, so this changes no output today; it
+  closes the hole for the next deletion or the next ruleset update.
+
+- **The Error Trigger migration is no longer presented as a drop-in swap.** The README said the
+  main trigger's Failed or Canceled option "replaces it", and llms-full.txt sent readers straight
+  at it. Measured on one job with both nodes polling in parallel: the reason fields do match, but
+  the job ID moves from `jobId` to `id`, the status moves from a lowercased `cancelled` to IBM's
+  own `Cancelled` and disappears entirely when IBM omits it, and the raw job moves from under `job`
+  to the top level. Both files now carry the difference as a table, and a test pins it so the two
+  cannot drift apart. The payloads themselves are untouched.
+
+- **Session > Set Accepting Jobs no longer claims it keeps the session open.** The description read
+  "Turn job acceptance on or off without closing the session", while the field directly below it
+  said the opposite. Measured on a fresh empty batch session on `ibm_fez`: turning acceptance off
+  moves the session from `open` / `session_created` to `closed` / `session_closed_early` on the
+  spot, with `closed_at` stamped. Setting it back to true flips `accepting_jobs` but leaves the
+  state closed, so the change is one way; the field description now says that too.
+
+- **Backend > Get Defaults says plainly that it returns nothing.** The description read "many
+  devices answer with an empty body". Measured on all three devices this account can reach, IBM
+  answers HTTP 200 with the literal `null`, content-length 4, every time, against 607 KB from Get
+  Properties on the same backend. Confirmed outside the node with a direct HTTP call, so it is not
+  the node discarding the body. The operation is kept rather than removed: unlike a write that
+  errors, it succeeds and returns an empty object, and removing it would break saved workflows for
+  no gain if IBM ever starts serving the data.
+
+- **The three submit actions say the circuit must already be transpiled.** With n8n's default
+  `descriptionType: 'auto'`, `getToolDescriptionForNode` builds an attached tool's description from
+  the operation's `action`, so `action` is the only text a model reads. It previously said "Submit a
+  circuit to the sampler primitive", which told an agent nothing about the one rule that sinks the
+  job. Confirmed the long `usableAsTool` blurb never reaches a model on either path: the agent
+  resolves the auto description, and n8n's own MCP server reports the base description, checked live
+  against the published 0.4.1. The `$fromAI` override n8n writes for a circuit field carries an
+  empty description, and `from-ai-parse-utils.js` attaches nothing when it is empty, so the
+  parameter reaches the model unannotated. The action now carries the constraint instead, so an
+  attached agent reads "Submit an already transpiled ISA circuit to the sampler primitive in IBM
+  Quantum". The other 31 actions were left alone: they read well to a human in the panel and carry
+  nothing a model needs to be warned about.
+
+- **The two triggers are now one.** The panel listed seven trigger entries built from two nodes, and
+  two of them were duplicates: "On failed" and "On failed only" matched identically on all fifteen
+  job statuses, as did "On canceled" and "On canceled only". The only thing separating each pair was
+  the output shape, which the panel does not show, so the choice was invisible. The main trigger
+  gains a **Failed or Canceled** option, the one filter it could not express, and its output now
+  carries `reason`, `reasonCode` and `reasonSolution` beside the untouched job. The fields are added,
+  not wrapped, and the job carries them only under `state`, so existing expressions are unaffected.
+  `IbmQuantumErrorTrigger` is marked `hidden`, not removed: it stays registered and saved workflows
+  keep polling, the way n8n retired Cron in favour of Schedule Trigger.
+- **The README no longer claims tooling picks up the `llms-full.txt` URL on its own.** It said the
+  codex file lists that URL "so tooling that reads node metadata finds it without being told", which
+  is false in both directions: n8n's `useNodeDocsUrl.ts` reads only `primaryDocumentation[0]`, the
+  README, and its MCP server passes on no documentation URL at all. The section now says to hand an
+  assistant the raw URL. Also dropped the release-pipeline paragraph, which described a maintainer
+  workflow rather than anything a user of the node needs, and moved the video and the articles from
+  the top of the page down to the end.
+
+- **The credential dialog's "Read our docs" link points at documentation about the credential.**
+  The credential class sent it to IBM's general guides index, which documents none of the four
+  fields on that screen, while the codex already sent the node panel to this package's Credentials
+  section. The two agree now, and a test keeps them agreeing.
+
+- **The trigger subtitle no longer shows a camelCase value on the canvas.** The subtitle renders
+  the stored value, so the new `failedOrCanceled` option read as "Polling for failedOrCanceled
+  jobs" on the node. It is spelled out now, and a test refuses any option value that is not plain
+  lowercase unless the subtitle handles it, so the next option added cannot reintroduce this.
+- **The catch-all trigger option has a readable panel label.** n8n renders each entry as
+  `action ?? 'On ' + noCase(name)`, and `noCase` flattened "Any Terminal (Completed, Failed or
+  Canceled)" into a run-on phrase. The option now sets `action: 'On any terminal state'`, which
+  keeps the panel short while the dropdown inside the node keeps the explanatory wording.
+- **One implementation of the failure fields instead of three.** The trigger, Get Results and the
+  retired error trigger each lifted `reason`, `reasonCode` and `reasonSolution` out of the job's
+  `state` with their own copy of the same three lines. They now share `stateError` in
+  `operations.ts`, so a job that failed cannot be reported differently depending on which path
+  read it. Verified by mutation: emptying the shared helper fails 10 tests across both consumers.
+
+- **The Parameters field no longer opens with an error marker.** It is a `json` field and its
+  default was the empty string, which does not parse, so n8n's code editor flagged an optional
+  field before the user had touched anything. The default is now `{}`. `submitJob` already treated
+  the empty string and `{}` identically, so no request changes.
+- **The AI tool blurb is 121 characters instead of 557.** It used to carry an operation list and a
+  raw documentation URL because it was assumed to be what a model reads. Two consumers were checked
+  and neither shows it: the AI Agent resolves n8n's default `descriptionType: 'auto'` through
+  `getToolDescriptionForNode`, which returns `<action> in IBM Quantum`, and n8n's own MCP server
+  reports the base description for every operation, confirmed live against the published 0.4.1.
+  What a model does receive is each parameter's own description, so the ISA constraint stays pinned
+  there and is now covered by a test.
+
+- **The trigger event parameter is labelled "Trigger On"**, the name n8n's UI guidelines specify, and
+  its tooltip is gone because the same guideline asks for none. n8n builds the Triggers list from a
+  property named Event, Events or Trigger On; ours were called Status and On, so the panel fell back
+  to a single unnamed placeholder instead of listing the options. Only the label changed, the stored
+  parameter names are untouched.
+- **The three listing operations are named "Get Many"**, which is what n8n's UX guidelines call the
+  standard listing operation, and Job "List Tags" is now "Get Many Tags". The stored values are
+  unchanged (`list`, `listTags`), so existing workflows keep working.
+- **Every operation now carries a description**, rendered under its name in the operation dropdown,
+  and example placeholders use the `e.g.` prefix the guidelines ask for.
+- **Both `/instances/configuration` calls are marked deprecated in the code.** IBM's live OpenAPI
+  spec flags GET and PUT on that path, in favour of the Resource Controller API. Both still answer.
+  Account Get Instance already reads the same fields from `/instance`, which is not deprecated.
+
+### Removed
+
+- **Account > Set Cost Limit is gone, leaving 33 operations.** IBM deprecated
+  `PUT /v1/instances/configuration` in its own OpenAPI spec and the endpoint no longer answers: it
+  hangs for about 180 seconds and then aborts the connection. Reproduced on 18 and again on 21
+  August, and once more outside the node entirely, by sending the identical method, URL and body
+  through n8n's own HTTP Request node, while `GET` on the same path answered 200 in 832 ms. There is
+  no replacement write endpoint, so a shipped operation that can only hang and fail was worse than
+  no operation at all. Set the ceiling on the IBM Cloud console instead; **Get Configuration** and
+  **Get Instance** still read it. A saved workflow that used it now fails immediately with
+  `Unsupported account operation: setCostLimit` rather than hanging for three minutes.
+
 ### Fixed
+
+- **Get Results no longer reports a Noise Learner result as missing.** The parser read only
+  `response.results`, but this one primitive answers under `data`, so a completed learning job came
+  back as `pubCount: 0`, `pubs: []` and `resultsAvailable: false`, the last of which is documented as
+  meaning IBM sent no result body at all. IBM had in fact sent a full `LayerError` with fifteen Pauli
+  generators and their rates. Get Results now emits one `noiseLearner` pub per learned layer, with
+  `qubits`, `generators`, `ratesEncoded` and `circuitEncoded`. The rates stay base64 zlib NumPy and
+  the circuit stays QPY, because inflating either needs `zlib`, which the community-node import
+  allowlist does not permit; both were always available in `raw` and still are. Sampler and Estimator
+  output is byte-for-byte unchanged, held by a regression test.
+  *Found on live hardware by running a learning job to completion for two QPU seconds, after an
+  earlier pass had only submitted one and cancelled it.*
 
 - **A multi-qubit gate can no longer use the same qubit twice.** `validateGateInput` checked arity,
   range, parameters and the measure target, but never that a gate's indices were distinct. Typing
@@ -147,129 +342,18 @@ All notable changes to this package are documented in this file.
   monthly scan's comment claimed it lints against the current ruleset, while `npm ci` installs the
   one the lockfile pins.
 
-### Added
-
-- **The Backend fields are dropdowns loaded from your account.** Five fields (Backend Name on the
-  backend operations, Backend on submit, Backend on session create, and the backend filters on the
-  job and workload listings) now populate from `GET /v1/backends` through a `loadOptions` method.
-  Labels carry the status and the queue depth, for example `ibm_kingston (online, 7 queued)`,
-  because that listing already returns both, so the dropdown costs one call and no extra endpoint.
-  The list is read when the node opens and again on **Refresh List** in the field menu, never on a
-  timer, so the status and queue in a label are a snapshot rather than a live reading; the tooltip
-  on all five fields says so. The stored value is still the bare name, so workflows saved before
-  this keep resolving, and the expression toggle still accepts a typed name when the list cannot
-  be loaded. n8n exempts any
-  value starting with `=` from option validation, and these fields declare no `validateType`, so a
-  name absent from the list is never rejected.
-
-
-- **A transpilation warning on every submit.** Qiskit Runtime does not transpile, so a circuit using
-  anything outside the IBM basis (cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier)
-  is accepted, queued, and only then fails, minutes later, with an opaque message. The submit
-  operations now read the OpenQASM 3 program and, when they find an instruction outside that set,
-  attach a `warnings` array to the output and write the same line to the node logger. It never
-  blocks: the job is still submitted. Gate definition blocks are skipped, because Qiskit's exporter
-  emits `gate rzz(p0) a, b { cx ...; }` for a perfectly valid ISA circuit and reading the body would
-  accuse a correct program. QPY is compressed, so it is not inspected.
-
-- **The failure reason on Get Results.** A job that failed or was cancelled now returns `reason`,
-  `reasonCode` and `reasonSolution` beside `status`, lifted out of `job.state`, which is where they
-  were buried. The same three fields the Error Trigger already emitted.
-
-- **`resultsAvailable: false` on Get Results.** IBM documents a 204 on the results endpoint as
-  "Job's final result not found". The empty-body guard turned that into a completed job with zero
-  pubs, indistinguishable from a real empty result set.
-
-- **`registerFallback` and `requestedRegister` on a sampler pub.** A job can hold several pubs whose
-  circuits name their classical registers differently. A pub that does not carry the requested
-  register reads its own and marks that it did, so a fallback can never pass for what was asked for.
-
-- **Context on IBM's terse 404s.** A missing job or session comes back naming the identifier and
-  carrying a solution, but a missing device or log answers with a bare "device not found" that names
-  nothing. Those two now carry the value the user supplied and where to check it, with IBM's own
-  wording kept inside the message. Only a 404 is treated this way: telling someone to check the
-  backend name when their token expired would send them after the wrong thing.
-
-### Changed
-
-- **The three submit actions say the circuit must already be transpiled.** With n8n's default
-  `descriptionType: 'auto'`, `getToolDescriptionForNode` builds an attached tool's description from
-  the operation's `action`, so `action` is the only text a model reads. It previously said "Submit a
-  circuit to the sampler primitive", which told an agent nothing about the one rule that sinks the
-  job. Confirmed the long `usableAsTool` blurb never reaches a model on either path: the agent
-  resolves the auto description, and n8n's own MCP server reports the base description, checked live
-  against the published 0.4.1. The `$fromAI` override n8n writes for a circuit field carries an
-  empty description, and `from-ai-parse-utils.js` attaches nothing when it is empty, so the
-  parameter reaches the model unannotated. The action now carries the constraint instead, so an
-  attached agent reads "Submit an already transpiled ISA circuit to the sampler primitive in IBM
-  Quantum". The other 31 actions were left alone: they read well to a human in the panel and carry
-  nothing a model needs to be warned about.
-
-- **The two triggers are now one.** The panel listed seven trigger entries built from two nodes, and
-  two of them were duplicates: "On failed" and "On failed only" matched identically on all fifteen
-  job statuses, as did "On canceled" and "On canceled only". The only thing separating each pair was
-  the output shape, which the panel does not show, so the choice was invisible. The main trigger
-  gains a **Failed or Canceled** option, the one filter it could not express, and its output now
-  carries `reason`, `reasonCode` and `reasonSolution` beside the untouched job. The fields are added,
-  not wrapped, and the job carries them only under `state`, so existing expressions are unaffected.
-  `IbmQuantumErrorTrigger` is marked `hidden`, not removed: it stays registered and saved workflows
-  keep polling, the way n8n retired Cron in favour of Schedule Trigger.
-- **The README no longer claims tooling picks up the `llms-full.txt` URL on its own.** It said the
-  codex file lists that URL "so tooling that reads node metadata finds it without being told", which
-  is false in both directions: n8n's `useNodeDocsUrl.ts` reads only `primaryDocumentation[0]`, the
-  README, and its MCP server passes on no documentation URL at all. The section now says to hand an
-  assistant the raw URL. Also dropped the release-pipeline paragraph, which described a maintainer
-  workflow rather than anything a user of the node needs, and moved the video and the articles from
-  the top of the page down to the end.
-
-- **The credential dialog's "Read our docs" link points at documentation about the credential.**
-  The credential class sent it to IBM's general guides index, which documents none of the four
-  fields on that screen, while the codex already sent the node panel to this package's Credentials
-  section. The two agree now, and a test keeps them agreeing.
-
-- **The trigger subtitle no longer shows a camelCase value on the canvas.** The subtitle renders
-  the stored value, so the new `failedOrCanceled` option read as "Polling for failedOrCanceled
-  jobs" on the node. It is spelled out now, and a test refuses any option value that is not plain
-  lowercase unless the subtitle handles it, so the next option added cannot reintroduce this.
-- **The catch-all trigger option has a readable panel label.** n8n renders each entry as
-  `action ?? 'On ' + noCase(name)`, and `noCase` flattened "Any Terminal (Completed, Failed or
-  Canceled)" into a run-on phrase. The option now sets `action: 'On any terminal state'`, which
-  keeps the panel short while the dropdown inside the node keeps the explanatory wording.
-- **One implementation of the failure fields instead of three.** The trigger, Get Results and the
-  retired error trigger each lifted `reason`, `reasonCode` and `reasonSolution` out of the job's
-  `state` with their own copy of the same three lines. They now share `stateError` in
-  `operations.ts`, so a job that failed cannot be reported differently depending on which path
-  read it. Verified by mutation: emptying the shared helper fails 10 tests across both consumers.
-
-- **The Parameters field no longer opens with an error marker.** It is a `json` field and its
-  default was the empty string, which does not parse, so n8n's code editor flagged an optional
-  field before the user had touched anything. The default is now `{}`. `submitJob` already treated
-  the empty string and `{}` identically, so no request changes.
-- **The AI tool blurb is 121 characters instead of 557.** It used to carry an operation list and a
-  raw documentation URL because it was assumed to be what a model reads. Two consumers were checked
-  and neither shows it: the AI Agent resolves n8n's default `descriptionType: 'auto'` through
-  `getToolDescriptionForNode`, which returns `<action> in IBM Quantum`, and n8n's own MCP server
-  reports the base description for every operation, confirmed live against the published 0.4.1.
-  What a model does receive is each parameter's own description, so the ISA constraint stays pinned
-  there and is now covered by a test.
-
-- **The trigger event parameter is labelled "Trigger On"**, the name n8n's UI guidelines specify, and
-  its tooltip is gone because the same guideline asks for none. n8n builds the Triggers list from a
-  property named Event, Events or Trigger On; ours were called Status and On, so the panel fell back
-  to a single unnamed placeholder instead of listing the options. Only the label changed, the stored
-  parameter names are untouched.
-- **The three listing operations are named "Get Many"**, which is what n8n's UX guidelines call the
-  standard listing operation, and Job "List Tags" is now "Get Many Tags". The stored values are
-  unchanged (`list`, `listTags`), so existing workflows keep working.
-- **Every operation now carries a description**, rendered under its name in the operation dropdown,
-  and example placeholders use the `e.g.` prefix the guidelines ask for.
-- **Both `/instances/configuration` calls are marked deprecated in the code.** IBM's live OpenAPI
-  spec flags GET and PUT on that path, in favour of the Resource Controller API. Both still answer.
-  Account Get Instance already reads the same fields from `/instance`, which is not deprecated.
+  A second pass, driven by an adversarial review of this release's own changes, caught four more,
+  all introduced by the fixes above and all in the README: a paragraph still instructing the reader
+  to "use Account > Set Cost Limit", an operation the same release deleted; a screenshot caption
+  reading "Actions (34)"; alt text reading "the nine Account actions"; and the session-closing
+  finding corrected in the node's own field description but never carried into the README or
+  `llms-full.txt`. None of these were caught by the test suite, by lint or by coverage. The
+  screenshot at `readme-assets/02-actions-top.png` was retaken: it now reads `Actions (33)` and its
+  Account list ends at "Get usage analytics grouped by date".
 
 ### Testing
 
-The suite goes from 276 to 616 tests, still at 100% statement, branch, function and line coverage.
+The suite goes from 276 to 641 tests, still at 100% statement, branch, function and line coverage.
 The new files cover ground that was unreachable before: `tests/input-guards.test.ts` for every
 parameter an expression can corrupt, `tests/node-execute.test.ts` for the node wrapper itself,
 `tests/isa-warning.test.ts` for the transpilation warning, and `tests/load-options.test.ts` for the
@@ -278,6 +362,83 @@ backend dropdown, including the label fallbacks and the case where the listing i
 all three of which were hardcoded or discarded, which is why multi-item processing, `pairedItem`,
 the continue-on-fail path and the `@version` gate had no coverage despite the 100% figure. All four
 turned out to be correct; they are now pinned.
+
+The later passes added the cases that had been missing rather than wrong: `tests/results.test.ts`
+gained the noise learner envelope, including seven malformed shapes that must yield nulls instead of
+throwing, and `tests/operations-getresults.test.ts` gained the case that proves `resultsAvailable`
+no longer lies about a body IBM did send. `tests/error-trigger.test.ts` pins the payload difference
+between the two triggers, so the comparison table in the README cannot drift away from the code.
+`tests/operations-submit.test.ts` covers the circuit list: one PUB per entry, the empty list, the
+cap, validation of every entry rather than the first, deduplicated warnings, and QPY wrapping each
+entry separately. `tests/isa-warning.test.ts` covers the classical-register warning and the
+entangling-statement counter behind it.
+
+Behavioural equivalence with the pre-change code was proved rather than argued. The tree at the
+release baseline was built separately and the same inputs run through both, comparing the request
+body sent to IBM, the item the node returns, and any thrown error, across eight configurations:
+Sampler minimal and with every option set, Estimator minimal and with precision, several observables
+and resilience 2, QPY, the noise learner minimal and fully configured, and a non-ISA circuit for the
+warning path. All eight are byte identical. Behaviour differs only where this release intends it to:
+a circuit list, which used to be refused, now submits several PUBs, and a multi-layer noise learner
+circuit gains one `warnings` entry while its request body stays unchanged.
+
+### Verified on hardware
+
+Nothing in this release is claimed from reading the code. Fifty-three jobs ran on IBM Quantum across
+21 and 22 August 2026, on `ibm_fez`, `ibm_kingston` and `ibm_marrakesh`, for about 360 QPU seconds of
+the Open plan's 600 per 28 days. The node was reinstalled from a real `npm pack` tarball before each
+phase, and `diff -rq` confirmed the installed `dist` matched the repository byte for byte every time.
+
+What ran, beyond every operation answering:
+
+- All 24 circuit gates individually, with the emitted OpenQASM 3 handed to Qiskit 2.5.2, which parsed
+  it and reported back the identical gate set. All 20 input guards, each blocking before a request.
+- All five Trigger On modes and all three Error Trigger modes, activated at once against jobs
+  produced in all three terminal states. Every one fired on exactly what it should, with no
+  duplicates across two poll cycles, and the tag filter was separately proved to be an AND.
+- The full session lifecycle on typeVersion 2 and on typeVersion 1, and then two jobs actually run
+  inside a batch session, which moved through `open`, `active` and
+  `inactive` / `session_inactivated_by_interactive_ttl` before closing.
+- The AI tool variant driven by a real agent that chose among three tools unaided, with `$fromAI`
+  resolving a numeric parameter end to end.
+- Physics that can be checked against theory rather than against an HTTP status: a Bell state at
+  4096 shots reading 92.9% correlated; three observables on that state returning +0.871, +0.920 and
+  -0.008 where theory says +1, +1 and 0; a parameterised `rx(pi)` returning all ones; and the
+  estimator's three resilience levels landing at 3.9%, 2.0% and 0.1% error against an exact -1.
+- A decoherence curve. The same identity circuit at three depths, with `T1 = 48.12 us` read from
+  `getProperties`: at 0.5 us the fidelity is 96.06%, at exactly T1 it is 50.39%, which is chance, and
+  at ten times T1 it is 50.67%, because nothing is more random than random.
+- The cost model, confirmed to three significant figures at three depths:
+  `255 us of fixed overhead + gates x 24 ns` per shot, the 24 ns being the `x` gate length read from
+  the backend rather than assumed.
+- The heaviest job: 500,000 shots on 20 qubits with no cap, charged 130 seconds, returning 5.25 MB
+  that the node decoded in 2.9 seconds into 626 distinct bitstrings summing to exactly 500,000.
+
+Ten claims this changelog makes were confirmed live for the first time: that the hardcoded basis gate
+set matches all three devices; that IBM accepts at most 8 tags; that tag lengths count characters
+rather than UTF-16 units; that a cancelled job's results endpoint answers 204; that `rzz` fails as a
+parse error rather than a target error; that gate twirling rejects fractional gates while the other
+two toggles do not; that Max Cost really does make IBM cut a job; that the trigger tag filter is an
+AND; and that the Executor program cannot be driven without Qiskit.
+
+Three faults were confirmed to sit on IBM's side, not this node's: `PUT /instances/configuration`
+hangs for about 180 seconds and dies, reproduced through a plain HTTP request with the node removed
+from the picture; `/backends/{name}/defaults` answers 200 with the literal `null`, four bytes, on
+every device; and the execution-timeout message is a broken Go template that reads
+`Job %!v(MISSING) ran longer than %!v(MISSING)`.
+
+The `eu-de` region was probed as far as this account allows, by sending the same credential's
+headers at the eu-de host rather than by changing the credential. The host is live and the
+authentication carries across it: `GET /versions` answers 200 with seven versions. Every
+instance-scoped endpoint answers 404 with code 1279, naming this account's us-east CRN and
+explaining that the instance is not there, which is correct: the region belongs to the instance, not
+to the credential. So the URL the node builds for `eu-de` is real and reachable, and a mismatched
+instance fails with a diagnosable message rather than a timeout. What remains unverified is an
+actual instance provisioned in eu-de, which is an account matter rather than a node one.
+
+Not reachable from this account at all: session `dedicated` mode, which the Open plan refuses,
+although the refusal itself was verified, and the Get Results timeout path, for which no queue was
+ever deep enough. Both remain covered by unit tests only.
 
 ### Dependencies
 

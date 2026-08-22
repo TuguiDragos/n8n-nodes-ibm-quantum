@@ -14,7 +14,7 @@ import {
 	type RequestContext,
 } from './transport';
 import { buildQasm3, parseNumberListStrict, validateGateInput, type GateOperation } from './qasm3';
-import { parseResults } from './results';
+import { hasNoiseLearnerData, parseResults } from './results';
 
 const CONTROLLED_TWO = new Set(['cx', 'cz', 'crx', 'cry', 'crz']);
 
@@ -605,16 +605,69 @@ function isaWarnings(format: string, source: string, backend: string): string[] 
 	];
 }
 
+// Count the statements that act on two or more qubits, which is what IBM groups into entangling
+// layers. barrier is excluded: it spans qubits without entangling them. Counted from the same
+// top-level scan as the ISA check, so a gate definition block cannot inflate the number.
+export function twoQubitStatements(qasm3: string): number {
+	let count = 0;
+	let depth = 0;
+	for (const rawLine of qasm3.split('\n')) {
+		const line = rawLine.trim();
+		const opens = (line.match(/\{/g) ?? []).length;
+		const closes = (line.match(/\}/g) ?? []).length;
+		const wasInsideBlock = depth > 0;
+		depth += opens - closes;
+		if (depth < 0) depth = 0;
+		if (wasInsideBlock || opens > 0) continue;
+		if (!line || line.startsWith('//')) continue;
+		if (
+			/^(OPENQASM|include|qubit|bit|creg|qreg|let|const|input|output|gate|def|barrier)\b/.test(line)
+		) {
+			continue;
+		}
+		// Distinct operands, so `cz q[0], q[0];` is not mistaken for a two-qubit statement.
+		const operands = new Set(line.match(/q\[\d+\]/g) ?? []);
+		if (operands.size >= 2) count += 1;
+	}
+	return count;
+}
+
+// A classical register the noise learner never uses. IBM splits the circuit into entangling layers
+// and carries the register into each, so a circuit with more than one layer is rejected with
+// "ClassicalRegister with name 'c' appears in multiple layers with different sizes". Measured on
+// ibm_fez: the same three-qubit circuit fails with a register and succeeds without one. A single
+// layer survives, which is why this only bites once the circuit grows. QPY is skipped for the same
+// reason as the ISA check: reading it would need Qiskit.
+export function noiseLearnerWarnings(format: string, source: string): string[] {
+	if (format === 'qpy') return [];
+	// Anchored so `qubit[2] q;` cannot match the classical declaration.
+	if (!/(^|\n)\s*bit\[\d+\]/.test(source)) return [];
+	// More than one layer needs at least two entangling gates, so a circuit with fewer cannot hit
+	// this and warning about it would be noise. Measured: one `cz` beside a classical register runs
+	// fine; two of them sharing a qubit is what fails.
+	if (twoQubitStatements(source) < 2) return [];
+	return [
+		'Circuit declares a classical register, which the noise learner does not use. IBM rejects a circuit carrying one once it splits into more than one entangling layer. Set "Number of Classical Bits" to 0 to leave it out.',
+	];
+}
+
+// Warnings are per circuit, but a batch of variants of the same experiment repeats the same one on
+// every entry. Deduplicating keeps the item readable without hiding a warning that applies to only
+// one circuit in the list.
+function collectWarnings(sources: string[], forOne: (source: string) => string[]): string[] {
+	return [...new Set(sources.flatMap(forOne))];
+}
+
 function readSubmitEnvelope(
 	this: IExecuteFunctions,
 	itemIndex: number,
 ): {
 	backend: string;
-	circuit: unknown;
+	circuits: unknown[];
 	sessionId: string;
 	body: IDataObject;
 	format: string;
-	source: string;
+	sources: string[];
 } {
 	const backend = requireIdentifier(
 		this.getNodeParameter('backend', itemIndex),
@@ -627,15 +680,39 @@ function readSubmitEnvelope(
 	const format = this.getNodeParameter('circuitFormat', itemIndex, 'qasm3') as string;
 	const circuitParam = format === 'qpy' ? 'qpyCircuit' : 'qasm3';
 	const circuitValue = this.getNodeParameter(circuitParam, itemIndex);
-	const circuit = typeof circuitValue === 'string' ? circuitValue : asTrimmedString(circuitValue);
+	// An expression that resolves to a list submits every circuit in one job, so the fixed per-job
+	// overhead of roughly two QPU seconds is paid once instead of once each. A single circuit stays
+	// a single circuit, so nothing saved before this existed changes shape.
+	const rawCircuits = Array.isArray(circuitValue) ? circuitValue : [circuitValue];
+	if (rawCircuits.length === 0) {
+		throw new NodeOperationError(
+			this.getNode(),
+			'Circuit list is empty; there is nothing to run.',
+			{
+				itemIndex,
+			},
+		);
+	}
+	if (rawCircuits.length > MAX_CIRCUITS_PER_JOB) {
+		throw new NodeOperationError(
+			this.getNode(),
+			`Circuit list has ${rawCircuits.length} entries; this node sends at most ${MAX_CIRCUITS_PER_JOB} in one job.`,
+			{ itemIndex },
+		);
+	}
+	const circuits = rawCircuits.map((entry) =>
+		typeof entry === 'string' ? entry : asTrimmedString(entry),
+	);
 	// Optional, so an empty value simply means no session. Coerced rather than required, because a
 	// numeric expression otherwise put session_id on the wire as a JSON number, where the schema
 	// asks for a string.
 	const sessionId = asTrimmedString(this.getNodeParameter('submitSessionId', itemIndex, ''));
 
-	requireSupportedCircuit(circuit, format, this.getNode(), itemIndex);
+	for (const entry of circuits) requireSupportedCircuit(entry, format, this.getNode(), itemIndex);
 	// QPY travels as the wrapper the official client sends, not as a bare string.
-	const payload = format === 'qpy' ? qpyCircuitPayload(circuit) : circuit;
+	const payloads = circuits.map((entry) =>
+		format === 'qpy' ? qpyCircuitPayload(entry) : (entry as unknown),
+	);
 
 	const body: IDataObject = {};
 	// session_id is a sibling of program_id/backend/params, never inside params.
@@ -658,7 +735,7 @@ function readSubmitEnvelope(
 	const logLevel = this.getNodeParameter('logLevel', itemIndex, '') as string;
 	if (logLevel) body.log_level = logLevel;
 
-	return { backend, circuit: payload, sessionId, body, format, source: circuit };
+	return { backend, circuits: payloads, sessionId, body, format, sources: circuits };
 }
 
 async function submitJob(
@@ -667,7 +744,7 @@ async function submitJob(
 	primitive: 'sampler' | 'estimator',
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const { backend, circuit, sessionId, body, format, source } = readSubmitEnvelope.call(
+	const { backend, circuits, sessionId, body, format, sources } = readSubmitEnvelope.call(
 		this,
 		itemIndex,
 	);
@@ -688,7 +765,7 @@ async function submitJob(
 	const options = buildPrimitiveOptions.call(this, itemIndex);
 	const params: IDataObject = { version: 2 };
 
-	let pub: unknown[];
+	let pubs: unknown[][];
 	if (primitive === 'estimator') {
 		const observablesRaw = this.getNodeParameter('observables', itemIndex) as string;
 		const observables = parseJsonParameter(
@@ -714,20 +791,24 @@ async function submitJob(
 			this.getNode(),
 			itemIndex,
 		);
-		pub = buildPubData('estimator', circuit, observables, parameters, 0, precision);
+		// One PUB per circuit. The observables, bindings and precision apply to all of them, which is
+		// what a batch of variants of the same experiment wants.
+		pubs = circuits.map((entry) =>
+			buildPubData('estimator', entry, observables, parameters, 0, precision),
+		);
 	} else {
 		const shots = clampCount(this.getNodeParameter('shots', itemIndex, 1024), 1024);
-		pub = buildPubData('sampler', circuit, null, parameters, shots, 0);
+		pubs = circuits.map((entry) => buildPubData('sampler', entry, null, parameters, shots, 0));
 	}
 
-	params.pubs = [pub];
+	params.pubs = pubs;
 	if (Object.keys(options).length > 0) params.options = options;
 
 	body.program_id = primitive;
 	body.backend = backend;
 	body.params = params;
 
-	const warnings = isaWarnings(format, source, backend);
+	const warnings = collectWarnings(sources, (entry) => isaWarnings(format, entry, backend));
 	for (const warning of warnings) this.logger.warn(warning);
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
@@ -749,7 +830,7 @@ async function submitNoiseLearnerJob(
 	ctx: RequestContext,
 	itemIndex: number,
 ): Promise<IDataObject> {
-	const { backend, circuit, sessionId, body, format, source } = readSubmitEnvelope.call(
+	const { backend, circuits, sessionId, body, format, sources } = readSubmitEnvelope.call(
 		this,
 		itemIndex,
 	);
@@ -792,14 +873,17 @@ async function submitNoiseLearnerJob(
 	const strategy = learner.twirlingStrategy;
 	if (typeof strategy === 'string' && strategy) options.twirling_strategy = strategy;
 
-	const params: IDataObject = { version: 2, circuits: [circuit] };
+	const params: IDataObject = { version: 2, circuits };
 	if (Object.keys(options).length > 0) params.options = options;
 
 	body.program_id = 'noise-learner';
 	body.backend = backend;
 	body.params = params;
 
-	const warnings = isaWarnings(format, source, backend);
+	const warnings = collectWarnings(sources, (entry) => [
+		...isaWarnings(format, entry, backend),
+		...noiseLearnerWarnings(format, entry),
+	]);
 	for (const warning of warnings) this.logger.warn(warning);
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
@@ -833,6 +917,10 @@ export const TERMINAL = ['completed', 'cancelled', 'canceled', 'failed', 'error'
 // The job carries both a state object and a top level status string. Read either.
 // IBM's schema bounds a job tag list to 8 entries of at most 86 characters. Exceeding either fails
 // the whole submit with a message that names neither the tag nor the bound, so check it here.
+// The node's own bound, not IBM's: an expression that resolves to a runaway array would otherwise
+// build one enormous request. A hundred circuits in a single job is far past any real batch.
+export const MAX_CIRCUITS_PER_JOB = 100;
+
 export const MAX_JOB_TAGS = 8;
 export const MAX_JOB_TAG_LENGTH = 86;
 
@@ -1046,7 +1134,9 @@ async function getResults(
 	// IBM documents a 204 on this endpoint as "Job's final result not found". The transport turns
 	// that empty body into {}, which parses to zero pubs and used to read as a completed job that
 	// simply produced nothing. Saying which of the two it was costs one field.
-	const resultsMissing = !Array.isArray(results.results);
+	// The noise learner carries its payload under `data`, so testing `results` alone reported a full
+	// result body as missing, which is the opposite of what this field promises.
+	const resultsMissing = !Array.isArray(results.results) && !hasNoiseLearnerData(results);
 	return {
 		jobId,
 		status,
@@ -1337,9 +1427,10 @@ export async function handleAccount(
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/usage');
 	}
 	if (operation === 'getConfiguration') {
-		// IBM marks GET and PUT /instances/configuration deprecated in the live OpenAPI spec, in
-		// favour of the Resource Controller API. Both still answer. Get Instance already reads the
-		// same fields from /instance, which is not deprecated, so prefer that for reads.
+		// IBM marks this deprecated in the live OpenAPI spec, in favour of the Resource Controller
+		// API, but the GET still answers in under a second. The PUT beside it does not, which is why
+		// Set Cost Limit was removed in 0.5.0. Get Instance reads the same fields from /instance,
+		// which is not deprecated, so prefer that.
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', '/instances/configuration');
 	}
 	if (operation === 'getInstance') {
@@ -1364,25 +1455,6 @@ export async function handleAccount(
 		// The by-date endpoint requires group_by and accepts only this one value.
 		if (operation === 'getAnalyticsByDate') qs.group_by = 'instance';
 		return ibmQuantumApiRequest.call(this, ctx, 'GET', analyticsEndpoint, undefined, qs);
-	}
-	if (operation === 'setCostLimit') {
-		// This write removes the spend cap when it sends null, so a value it cannot read must fail
-		// rather than fall through to that. 'abc', '', null and a negative all used to clear the cap
-		// silently, which is the opposite of what someone setting a limit intended.
-		const requested = requireBoundedNumber(
-			this.getNodeParameter('instanceLimit', itemIndex, 0),
-			'Cost Limit',
-			{ min: 0, integer: true },
-			this.getNode(),
-			itemIndex,
-		);
-		// Zero clears the limit, which the API expresses as an explicit null rather than an absent key.
-		const instanceLimit = requested > 0 ? requested : null;
-		// Deprecated by IBM alongside the GET above; there is no replacement write endpoint yet.
-		await ibmQuantumApiRequest.call(this, ctx, 'PUT', '/instances/configuration', {
-			instance_limit: instanceLimit,
-		});
-		return { instanceLimit };
 	}
 	throw new NodeOperationError(this.getNode(), `Unsupported account operation: ${operation}`, {
 		itemIndex,

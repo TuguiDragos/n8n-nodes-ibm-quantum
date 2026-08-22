@@ -171,6 +171,22 @@ describe('withErrorDetails', () => {
 		expect(out.state).toBe(job.state);
 	});
 
+	// The two triggers shape their output differently, and the README and llms-full.txt now say so.
+	// This pins the difference so the documentation cannot drift away from the code: the main
+	// trigger spreads IBM's job untouched, so it reports `id` and IBM's own casing, and it adds no
+	// `status` of its own. The error trigger computes a lowercased one. Changing either would break
+	// the workflows already running on them.
+	it('adds no status of its own, unlike the error trigger', () => {
+		const job = { id: 'job-9', state: { status: 'Cancelled' } };
+		expect(withErrorDetails(job)).not.toHaveProperty('status');
+		expect(withErrorDetails({ ...job, status: 'Cancelled' }).status).toBe('Cancelled');
+		// Same job, the other node: an id under a different key and a lowercased status.
+		const viaError = extractStateError(job);
+		expect(viaError.status).toBe('cancelled');
+		expect(viaError.jobId).toBe('job-9');
+		expect(viaError).not.toHaveProperty('id');
+	});
+
 	it('lifts the failure details to the top level', () => {
 		const out = withErrorDetails({
 			id: 'job-9',

@@ -17,9 +17,11 @@ export class IbmQuantumErrorTrigger implements INodeType {
 		icon: { light: 'file:ibmQuantum.svg', dark: 'file:ibmQuantum.dark.svg' },
 		group: ['trigger'],
 		version: 1,
-		// Superseded by the main trigger's 'Failed or Canceled' option, which now emits the same
-		// reason fields. Hidden rather than removed so saved workflows keep polling, the way n8n
-		// retired Cron in favour of Schedule Trigger.
+		// Superseded by the main trigger's 'Failed or Canceled' option, which matches the same jobs
+		// and emits the same three reason fields. The rest of the payload differs though, so it is
+		// not a drop-in swap: this node reports `jobId` and a lowercased `status`, while the main
+		// trigger spreads IBM's job and so reports `id` and IBM's own casing. Hidden rather than
+		// removed so saved workflows keep polling, the way n8n retired Cron for Schedule Trigger.
 		hidden: true,
 		subtitle: '=On {{$parameter["errorFilter"]}} jobs',
 		description:

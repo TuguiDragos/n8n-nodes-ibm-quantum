@@ -42,6 +42,15 @@ classes and one credential. TypeScript, zero runtime dependencies, Node.js 22 or
   must default to 50. Both are enforced by the n8n lint rules, not by convention.
 - **Triggers must not set `usableAsTool`.** A polling trigger cannot run as a tool, and the current
   verification ruleset rejects it.
+- **Only ten imports are allowed at runtime.** `no-restricted-imports` permits `n8n-workflow`,
+  `ai-node-sdk`, `lodash`, `moment`, `p-limit`, `luxon`, `zod`, `crypto`, `node:crypto` and
+  `@n8n/ai-node-sdk`, plus relative paths and devDependencies. Notably `zlib` is not on it, which is
+  why the noise learner's rates and QPY circuits are passed through encoded rather than decoded. A
+  global such as `DecompressionStream` would slip past the rule, but the ruleset changes on its own
+  schedule and a workaround is the first thing to break.
+- **Lint fails on warnings.** `npm run lint` passes `--max-warnings 0`, because seven rules in the
+  ruleset are `warn` rather than `error` and the scanner's verdict counts only errors. Without the
+  flag, a deletion that orphaned a file would pass CI green.
 
 ## Before you finish
 

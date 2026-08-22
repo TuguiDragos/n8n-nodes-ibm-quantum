@@ -94,11 +94,68 @@ export function parseSamplerPub(data: IDataObject, preferredRegister?: string): 
 	};
 }
 
+// IBM serialises its Python objects as { __type__, __module__, __class__, __value__ }. Only the
+// payload matters here, and a level that is missing or reshaped must not throw: the caller keeps
+// the untouched body as `raw`, so degrading to null loses nothing and keeps the failure readable.
+function unwrap(value: unknown): IDataObject {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+	const object = value as IDataObject;
+	const inner = object.__value__;
+	if (inner && typeof inner === 'object' && !Array.isArray(inner)) return inner as IDataObject;
+	return object;
+}
+
+// The same envelope, but for the leaves IBM encodes as a base64 string rather than a nested
+// object. Returns null for anything that is not one, so a reshaped body yields a null field
+// instead of a half-read value.
+function encodedValue(value: unknown): string | null {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+	const inner = (value as IDataObject).__value__;
+	return typeof inner === 'string' ? inner : null;
+}
+
+// One learned layer from a noise learner job. `rates` is left exactly as IBM sent it, a base64
+// zlib-compressed NumPy array: inflating it needs zlib, which the community-node import allowlist
+// does not permit, so it is passed through under a name that says what it is rather than decoded.
+// `circuit` is QPY for the same reason. The generators beside them are already plain strings.
+export function parseNoiseLearnerPub(entry: unknown): IDataObject {
+	const layer = unwrap(entry);
+	const error = unwrap(layer.error);
+	const generators = unwrap(error.generators).data;
+	const rates = encodedValue(error.rates);
+	const circuit = encodedValue(layer.circuit);
+	return {
+		type: 'noiseLearner',
+		qubits: Array.isArray(layer.qubits) ? layer.qubits : null,
+		generators: Array.isArray(generators) ? generators : null,
+		// Compressed NumPy float64, one rate per generator and in the same order. Decode with
+		// zlib.inflate then read the NPY body, or hand the raw value to qiskit-ibm-runtime.
+		ratesEncoded: rates,
+		// QPY, the layer this error was learned on. Kept so a Qiskit-side consumer can rebuild it.
+		circuitEncoded: circuit,
+	};
+}
+
+// The noise learner answers on a different shape from the sampler and the estimator: its payload
+// sits under `data` rather than `results`, and each entry is a serialised LayerError, not a PUB.
+// Reading only `results` reported a real result as zero pubs, and told the caller the body was
+// empty when it was not.
+export function hasNoiseLearnerData(response: IDataObject): boolean {
+	return !Array.isArray(response.results) && Array.isArray(response.data);
+}
+
 export function parseResults(response: IDataObject, preferredRegister?: string): IDataObject {
 	// Guard on the shape, not just on null. `?? []` let a non-array `results` through to .map and
 	// crashed with a bare TypeError; the caller still returns the untouched body as `raw`, so
 	// degrading to zero pubs loses nothing and keeps the failure readable.
 	const results = Array.isArray(response.results) ? (response.results as IDataObject[]) : [];
+
+	// Handled before the register logic below, which is about sampler classical registers and has
+	// no meaning for a learned noise layer.
+	if (hasNoiseLearnerData(response)) {
+		const layers = (response.data as unknown[]).map(parseNoiseLearnerPub);
+		return { pubCount: layers.length, pubs: layers };
+	}
 
 	// The register check belongs here, where every pub is visible. A job can hold several pubs whose
 	// circuits name their registers differently, so a name missing from one pub is not an error as

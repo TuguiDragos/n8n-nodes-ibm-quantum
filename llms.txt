@@ -2,7 +2,7 @@
 
 > Verified n8n community node for IBM Quantum: build OpenQASM 3 circuits, submit them to real
 > quantum hardware through the Qiskit Runtime REST API on IBM Cloud, and trigger workflows on job
-> completion or failure. 3 nodes (1 action node and 2 polling triggers), 34 operations
+> completion or failure. 3 nodes (1 action node and 2 polling triggers), 33 operations
 > across 6 resources, zero runtime dependencies, usable as an n8n AI Agent tool.
 
 Unofficial, community-maintained package by Țugui Dragoș-Constantin; not affiliated with IBM.

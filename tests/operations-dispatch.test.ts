@@ -357,34 +357,6 @@ describe('handleAccount endpoints (TEST-12)', () => {
 		expect(requests[0].qs).toBeUndefined();
 	});
 
-	it('writes the cost limit, and sends null to clear it', async () => {
-		const set = makeExecuteContext({ params: { instanceLimit: 600 }, http: () => ({}) });
-		const result = (await handleAccount.call(set.ctx, TEST_CTX, 'setCostLimit', 0)) as Record<
-			string,
-			unknown
-		>;
-		expect(set.requests[0]).toMatchObject({
-			method: 'PUT',
-			url: `${base}/instances/configuration`,
-		});
-		expect(set.requests[0].body).toEqual({ instance_limit: 600 });
-		expect(result).toEqual({ instanceLimit: 600 });
-
-		// Zero is the documented way to clear the cap.
-		const cleared = makeExecuteContext({ params: { instanceLimit: 0 }, http: () => ({}) });
-		await handleAccount.call(cleared.ctx, TEST_CTX, 'setCostLimit', 0);
-		expect(cleared.requests[0].body).toEqual({ instance_limit: null });
-
-		// A value the node cannot read must not reach that same null, which would remove the cap
-		// the user was trying to set.
-		for (const value of [-5, 'nonsense']) {
-			const bad = makeExecuteContext({ params: { instanceLimit: value }, http: () => ({}) });
-			await expect(handleAccount.call(bad.ctx, TEST_CTX, 'setCostLimit', 0)).rejects.toThrow(
-				/Cost Limit must be an integer at least 0/,
-			);
-			expect(bad.requests).toHaveLength(0);
-		}
-	});
 });
 
 describe('unknown operations fail loudly instead of falling through', () => {
@@ -401,6 +373,20 @@ describe('unknown operations fail loudly instead of falling through', () => {
 		const { ctx, requests } = makeExecuteContext({ params: { sessionId: 'sess-1' }, http: () => ({}) });
 		await expect(handleSession.call(ctx, TEST_CTX, 'stop', 0)).rejects.toThrow(
 			/Unsupported session operation: stop/,
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	// Set Cost Limit was removed in 0.5.0 because IBM's write endpoint stopped answering. A saved
+	// workflow still carrying it must fail here, immediately and by name, rather than reach any
+	// request. This is the whole safety argument for removing the operation instead of keeping it.
+	it('handleAccount refuses the removed setCostLimit without writing anything', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { instanceLimit: 600 },
+			http: () => ({}),
+		});
+		await expect(handleAccount.call(ctx, TEST_CTX, 'setCostLimit', 0)).rejects.toThrow(
+			/Unsupported account operation: setCostLimit/,
 		);
 		expect(requests).toHaveLength(0);
 	});

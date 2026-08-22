@@ -70,7 +70,7 @@ describe('codex files', () => {
 describe('documented surface', () => {
 	// The operation count appears in README.md and llms.txt. Both are written by hand, so this
 	// pins the real figure: if you add an operation, update the prose the failure points at.
-	const EXPECTED = { account: 9, backend: 6, circuit: 2, job: 12, session: 4, workload: 1 };
+	const EXPECTED = { account: 8, backend: 6, circuit: 2, job: 12, session: 4, workload: 1 };
 
 	it('has the resource and operation counts the docs claim', () => {
 		const counts: Record<string, number> = {};
@@ -82,7 +82,7 @@ describe('documented surface', () => {
 		}
 		expect(counts).toEqual(EXPECTED);
 		const total = Object.values(EXPECTED).reduce((sum, n) => sum + n, 0);
-		expect(total).toBe(34);
+		expect(total).toBe(33);
 
 		// The same figure is written out in three places by hand. Pin all of them, because a count
 		// that drifts in prose is the kind of error no other test would ever catch.

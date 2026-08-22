@@ -1,6 +1,12 @@
+import type { IDataObject } from 'n8n-workflow';
 import { describe, expect, it } from 'vitest';
 
-import { parseResults, samplesToCounts } from '../nodes/IbmQuantum/results';
+import {
+	hasNoiseLearnerData,
+	parseNoiseLearnerPub,
+	parseResults,
+	samplesToCounts,
+} from '../nodes/IbmQuantum/results';
 
 describe('samplesToCounts', () => {
 	it('counts hex samples as zero-padded bitstrings', () => {
@@ -103,5 +109,90 @@ describe('inferNumBits NaN guard', () => {
 		const pub = (parseResults(response).pubs as Array<Record<string, unknown>>)[0];
 		expect(pub.numBits).toBe(1);
 		expect(pub.counts).toEqual({ '1': 1 });
+	});
+});
+
+// Trimmed from the body IBM actually returned for job da49nauaa69c739jhigg on ibm_fez, a completed
+// noise learner run. The point is the shape: the payload is under `data`, not `results`.
+const NOISE_LEARNER_BODY = {
+	data: [
+		{
+			__type__: '_json',
+			__module__: 'qiskit_ibm_runtime.utils.noise_learner_result',
+			__class__: 'LayerError',
+			__value__: {
+				circuit: { __type__: 'QuantumCircuit', __value__: 'eJwL9Az29gzhZWJlgALGgkIG' },
+				qubits: [0, 1],
+				error: {
+					__type__: '_json',
+					__class__: 'PauliLindbladError',
+					__value__: {
+						generators: {
+							__type__: 'settings',
+							__class__: 'PauliList',
+							__value__: { data: ['IX', 'ZZ'] },
+						},
+						rates: { __type__: 'ndarray', __value__: 'eJyb7BfqGxDJyFDGUK2ekloc' },
+					},
+				},
+			},
+		},
+	],
+	metadata: { backend: 'ibm_fez', input_options: { num_randomizations: 1 } },
+};
+
+describe('noise learner results', () => {
+	it('recognises the body by its data array, not by results', () => {
+		expect(hasNoiseLearnerData(NOISE_LEARNER_BODY)).toBe(true);
+		// A sampler body wins even when both keys are present, so the established shape never
+		// changes meaning underneath a workflow that already reads it.
+		expect(hasNoiseLearnerData({ results: [], data: [{}] })).toBe(false);
+		expect(hasNoiseLearnerData({})).toBe(false);
+		expect(hasNoiseLearnerData({ data: 'nope' })).toBe(false);
+	});
+
+	// This is the defect: a real 1133-byte result body used to come back as zero pubs.
+	it('parses a learned layer instead of reporting nothing', () => {
+		const parsed = parseResults(NOISE_LEARNER_BODY);
+		expect(parsed.pubCount).toBe(1);
+		expect((parsed.pubs as IDataObject[])[0]).toEqual({
+			type: 'noiseLearner',
+			qubits: [0, 1],
+			generators: ['IX', 'ZZ'],
+			ratesEncoded: 'eJyb7BfqGxDJyFDGUK2ekloc',
+			circuitEncoded: 'eJwL9Az29gzhZWJlgALGgkIG',
+		});
+	});
+
+	// The register check exists for sampler classical registers. A learned layer has none, so
+	// asking for one must not raise on a body that could never carry it.
+	it('ignores a requested register rather than throwing', () => {
+		expect(() => parseResults(NOISE_LEARNER_BODY, 'c')).not.toThrow();
+		expect(parseResults(NOISE_LEARNER_BODY, 'c').pubCount).toBe(1);
+	});
+
+	it('reports an empty data array as zero pubs without failing', () => {
+		expect(parseResults({ data: [] })).toEqual({ pubCount: 0, pubs: [] });
+	});
+
+	// Every level of IBM's envelope is optional as far as this parser is concerned: a reshaped body
+	// must yield nulls, never a throw, because the caller still hands back the untouched raw body.
+	it.each([
+		['null entry', null],
+		['bare string', 'nope'],
+		['empty object', {}],
+		['no __value__', { __type__: '_json' }],
+		['error is not an object', { __value__: { qubits: [0], error: 7 } }],
+		['generators is not a list', { __value__: { error: { __value__: { generators: 5 } } } }],
+		['rates is an object, not base64', { __value__: { error: { __value__: { rates: { __value__: {} } } } } }],
+	])('survives a %s', (_label, entry) => {
+		const pub = parseNoiseLearnerPub(entry);
+		expect(pub.type).toBe('noiseLearner');
+		expect(() => JSON.stringify(pub)).not.toThrow();
+	});
+
+	it('keeps qubits only when they arrive as a list', () => {
+		expect(parseNoiseLearnerPub({ __value__: { qubits: 'nope' } }).qubits).toBeNull();
+		expect(parseNoiseLearnerPub({ __value__: { qubits: [3, 4] } }).qubits).toEqual([3, 4]);
 	});
 });

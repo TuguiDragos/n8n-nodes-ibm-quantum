@@ -68,7 +68,7 @@ export class IbmQuantumApi implements ICredentialType {
 			],
 			default: 'us-east',
 			description:
-				'Region your IBM Quantum Platform instance was created in. This must match the region of the instance the CRN above belongs to.',
+				'Region your IBM Quantum Platform instance was created in. This must match the region of the instance the CRN above belongs to; a mismatch answers 404 with IBM code 1279 naming the CRN, not an authentication error.',
 		},
 		{
 			displayName: 'API Version',

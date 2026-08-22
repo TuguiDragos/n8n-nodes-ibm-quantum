@@ -7,6 +7,7 @@ vi.mock('n8n-workflow', async (importOriginal) => {
 	return { ...actual, sleep: vi.fn(() => Promise.resolve()) };
 });
 
+import type { IDataObject } from 'n8n-workflow';
 import { sleep } from 'n8n-workflow';
 
 import {
@@ -166,6 +167,45 @@ describe('getResults polling loop (TEST-02)', () => {
 		expect(result.status).toBe('completed');
 		expect(result.resultsAvailable).toBe(false);
 		expect(result.pubCount).toBe(0);
+	});
+
+	// The noise learner puts its payload under `data`, not `results`. Testing `results` alone
+	// reported a full 1133-byte body as missing, which is the opposite of what this field promises,
+	// and llms-full.txt documents resultsAvailable:false as meaning IBM sent no body at all.
+	it('does not claim a noise learner result is missing', async () => {
+		const { result } = await getResults({}, (call) => {
+			if (isResults(call)) {
+				return {
+					data: [
+						{
+							__class__: 'LayerError',
+							__value__: {
+								qubits: [0, 1],
+								error: {
+									__value__: {
+										generators: { __value__: { data: ['IX', 'ZZ'] } },
+										rates: { __type__: 'ndarray', __value__: 'eJyb7BfqGxA' },
+									},
+								},
+							},
+						},
+					],
+					metadata: { backend: 'ibm_fez' },
+				};
+			}
+			return { state: { status: 'Completed' } };
+		});
+		expect(result.status).toBe('completed');
+		expect(result).not.toHaveProperty('resultsAvailable');
+		expect(result.pubCount).toBe(1);
+		expect((result.pubs as IDataObject[])[0]).toMatchObject({
+			type: 'noiseLearner',
+			qubits: [0, 1],
+			generators: ['IX', 'ZZ'],
+			ratesEncoded: 'eJyb7BfqGxA',
+		});
+		// The untouched body stays available beside the parsed view.
+		expect(result.raw).toHaveProperty('metadata');
 	});
 
 	it('does not flag a real result set that simply has no pubs', async () => {

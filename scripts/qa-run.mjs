@@ -221,23 +221,6 @@ async function main() {
 		console.log('\n[2d] Noise learner skipped (set QA_NOISE_LEARNER=1 to include it)');
 	}
 
-	// ---- Phase 2c: the instance cost limit, opt-in because it writes account configuration.
-	// It reads the current value and writes the same one back, so the instance is unchanged.
-	if (process.env.QA_WRITE_CONFIG === '1') {
-		console.log('\n[2c] Cost limit round trip (writes back the value it read)...');
-		const nodesL = [
-			webhook('qa-costlimit'),
-			ibm('read config', { resource: 'account', operation: 'getConfiguration' }),
-			ibm('write same limit', { resource: 'account', operation: 'setCostLimit',
-				instanceLimit: "={{ $('read config').item.json.instance_limit || 0 }}" }),
-			ibm('verify config', { resource: 'account', operation: 'getConfiguration' }),
-		];
-		const idL = await createWf('[QA] Cost limit round trip', nodesL, chain(nodesL.map((n) => n.name)), true);
-		report('Cost limit round trip', await runWebhook(idL, 'qa-costlimit', { timeout: 60000 }));
-	} else {
-		console.log('\n[2c] Cost limit round trip skipped (set QA_WRITE_CONFIG=1 to include it)');
-	}
-
 	// ---- Phase 3: session lifecycle
 	console.log('\n[3] Session lifecycle...');
 	const nodesE = [

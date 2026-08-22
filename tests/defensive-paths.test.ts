@@ -176,8 +176,8 @@ describe('node identity used by the helpers', () => {
 });
 
 describe('an empty response body never reaches n8n as null', () => {
-	// Found on live hardware: IBM answers GET /backends/{id}/defaults with no content for some
-	// devices. The node used to pass that straight through as `json: null`, and n8n's execution
+	// Found on live hardware: IBM answers GET /backends/{id}/defaults with the literal `null` on
+	// every device tested. The node used to pass that straight through as `json: null`, and n8n's execution
 	// engine reads `json.$error` off every result without a null check, so a single empty body
 	// failed the whole run with "Cannot read properties of null".
 	const runBackend = (respond: () => unknown) => {

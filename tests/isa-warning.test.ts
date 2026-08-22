@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { handleJob, nonIsaInstructions } from '../nodes/IbmQuantum/operations';
+import {
+	handleJob,
+	noiseLearnerWarnings,
+	nonIsaInstructions,
+	twoQubitStatements,
+} from '../nodes/IbmQuantum/operations';
 import { makeExecuteContext, TEST_CTX } from './fakeContext';
 
 // Qiskit Runtime does not transpile. Every IBM device reports the same basis today
@@ -133,6 +138,15 @@ describe('the submit operations warn without blocking', () => {
 		expect(out.warnings).toBeTruthy();
 	});
 
+	// The circuit is fully ISA, so the only warning it can carry is the classical-register one.
+	it('warns about the classical register on a noise learner submit', async () => {
+		const { out } = await submit('submitNoiseLearner', {
+			qasm3: `${HEAD}cz q[0], q[1];\ncz q[1], q[2];`,
+			noiseLearnerOptions: {},
+		});
+		expect(out.warnings).toEqual([expect.stringMatching(/Number of Classical Bits/)]);
+	});
+
 	it('warns on the noise learner path too', async () => {
 		const { out } = await submit('submitNoiseLearner', {
 			qasm3: `${HEAD}swap q[0], q[1];`,
@@ -150,5 +164,80 @@ describe('the submit operations warn without blocking', () => {
 		});
 		expect(out).not.toHaveProperty('warnings');
 		expect(warned).toHaveLength(0);
+	});
+});
+
+// Measured on ibm_fez: a three-qubit circuit with cz(0,1) and cz(1,2) FAILS with "ClassicalRegister
+// with name 'c' appears in multiple layers with different sizes (3 != 2)" when the builder's default
+// two classical bits are left in place, and COMPLETES with two learned layers when they are set to
+// zero. The register is what breaks it, and the default is what puts it there.
+describe('noiseLearnerWarnings', () => {
+	const NO_CLBITS = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[3] q;\n';
+
+	// Two entangling gates plus a register is the shape that failed on ibm_fez.
+	it('warns when a multi-layer circuit carries a classical register', () => {
+		const warnings = noiseLearnerWarnings('qasm3', `${HEAD}cz q[0], q[1];\ncz q[1], q[2];`);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toMatch(/Number of Classical Bits/);
+	});
+
+	it('stays silent when there is no register', () => {
+		expect(noiseLearnerWarnings('qasm3', `${NO_CLBITS}cz q[0], q[1];\ncz q[1], q[2];`)).toEqual([]);
+	});
+
+	// One entangling gate cannot produce a second layer, so the register is harmless and warning
+	// about it would be noise on every single-layer circuit anyone submits.
+	it('stays silent below two entangling gates, register or not', () => {
+		expect(noiseLearnerWarnings('qasm3', `${HEAD}cz q[0], q[1];`)).toEqual([]);
+		expect(noiseLearnerWarnings('qasm3', `${HEAD}x q[0];`)).toEqual([]);
+	});
+
+	describe('twoQubitStatements', () => {
+		it('counts statements acting on two or more distinct qubits', () => {
+			expect(twoQubitStatements(`${HEAD}x q[0];`)).toBe(0);
+			expect(twoQubitStatements(`${HEAD}cz q[0], q[1];`)).toBe(1);
+			expect(twoQubitStatements(`${HEAD}cz q[0], q[1];\ncz q[1], q[2];`)).toBe(2);
+			expect(twoQubitStatements(`${HEAD}ccx q[0], q[1], q[2];`)).toBe(1);
+		});
+
+		// barrier spans qubits without entangling them, so it is not a layer.
+		it('ignores barrier and the declarations', () => {
+			expect(twoQubitStatements(`${HEAD}barrier q[0], q[1], q[2];`)).toBe(0);
+			expect(twoQubitStatements(HEAD)).toBe(0);
+		});
+
+		// A repeated index is one qubit, and the builder refuses it anyway.
+		it('counts distinct operands, not occurrences', () => {
+			expect(twoQubitStatements(`${HEAD}cz q[0], q[0];`)).toBe(0);
+		});
+
+		// A stray closing brace would drive the depth below zero and make every later line read as
+		// though it were inside a block, so the counter would silently return zero.
+		it('recovers from an unbalanced closing brace', () => {
+			expect(twoQubitStatements(`${HEAD}}\ncz q[0], q[1];\ncz q[1], q[2];`)).toBe(2);
+		});
+
+		// A statement naming no qubit at all must count as zero rather than throw.
+		it('handles a statement with no qubit operands', () => {
+			expect(twoQubitStatements(`${HEAD}delay[100ns];\ncz q[0], q[1];`)).toBe(1);
+		});
+
+		// Same reasoning as the ISA scan: a gate definition body is not what the device runs.
+		it('does not count a gate definition block', () => {
+			const withBlock = `OPENQASM 3.0;\ngate rzz(p0) a, b {\n  cx a, b;\n  cz q[0], q[1];\n}\nqubit[2] q;\nx q[0];`;
+			expect(twoQubitStatements(withBlock)).toBe(0);
+		});
+	});
+
+	// `qubit[2] q;` contains the substring `bit[2]`, so the check has to be anchored or every
+	// circuit ever written would warn.
+	it('does not mistake the quantum register for a classical one', () => {
+		expect(noiseLearnerWarnings('qasm3', 'OPENQASM 3.0;\nqubit[2] q;\n')).toEqual([]);
+		expect(noiseLearnerWarnings('qasm3', 'qubit[2] q;')).toEqual([]);
+	});
+
+	// Same reasoning as the ISA check: a QPY blob cannot be read without Qiskit.
+	it('stays silent for QPY', () => {
+		expect(noiseLearnerWarnings('qpy', `${HEAD}cz q[0], q[1];`)).toEqual([]);
 	});
 });

@@ -105,12 +105,6 @@ export const nodeProperties: INodeProperties[] = [
 				action: 'Get usage analytics grouped by date',
 				description: 'The same totals as a time series, one point per day',
 			},
-			{
-				name: 'Set Cost Limit',
-				value: 'setCostLimit',
-				action: 'Set the instance cost limit',
-				description: 'Cap the seconds this instance may consume, or clear the cap',
-			},
 		],
 		default: 'getUsage',
 	},
@@ -132,7 +126,7 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'Get Defaults',
 				value: 'getDefaults',
 				action: 'Get backend default settings',
-				description: 'Pulse level defaults; many devices answer with an empty body',
+				description: 'Pulse level defaults; every IBM Cloud device returns an empty object',
 			},
 			{
 				name: 'Get Least Busy',
@@ -297,7 +291,7 @@ export const nodeProperties: INodeProperties[] = [
 				name: 'Set Accepting Jobs',
 				value: 'setAccepting',
 				action: 'Set whether the session accepts new jobs',
-				description: 'Turn job acceptance on or off without closing the session',
+				description: 'Stop a session taking new jobs; that ends it and it cannot reopen',
 			},
 		],
 		default: 'create',
@@ -392,17 +386,6 @@ export const nodeProperties: INodeProperties[] = [
 			},
 		],
 	},
-	{
-		displayName: 'Cost Limit (Seconds)',
-		name: 'instanceLimit',
-		type: 'number',
-		typeOptions: { minValue: 0 },
-		default: 0,
-		description:
-			'Total runtime seconds the instance may spend before IBM cancels running jobs with "Ran too long". Zero removes the limit entirely.',
-		displayOptions: { show: { resource: ['account'], operation: ['setCostLimit'] } },
-	},
-
 	{
 		displayName: 'Operation',
 		name: 'operation',
@@ -1145,7 +1128,7 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'boolean',
 		default: true,
 		description:
-			'Whether the session keeps accepting new jobs. Set to false to stop it taking work; it closes once running jobs finish.',
+			'Whether the session keeps accepting new jobs. Set to false to stop it taking work; it closes once running jobs finish, and setting this back to true does not reopen it.',
 		displayOptions: { show: { resource: ['session'], operation: ['setAccepting'] } },
 	},
 ];

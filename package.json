@@ -40,7 +40,7 @@
     "dev": "tsc --watch",
     "format": "prettier nodes credentials --write",
     "format:check": "prettier nodes credentials --check",
-    "lint": "eslint package.json nodes credentials",
+    "lint": "eslint package.json nodes credentials --max-warnings 0",
     "lintfix": "eslint package.json nodes credentials --fix",
     "scan": "npx --yes @n8n/scan-community-package@latest n8n-nodes-ibm-quantum",
     "test": "vitest run",

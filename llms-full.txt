@@ -29,7 +29,7 @@ n8n workflow JSON uses these exact `type` strings (community packages prefix the
 | :-- | :-- | :-- |
 | IBM Quantum (Unofficial) | `n8n-nodes-ibm-quantum.ibmQuantum` | action node, all operations |
 | IBM Quantum (Unofficial) Trigger | `n8n-nodes-ibm-quantum.ibmQuantumTrigger` | polling trigger, fires when a job reaches a terminal state, carrying the failure reason when there is one |
-| IBM Quantum Error (Unofficial) Trigger | `n8n-nodes-ibm-quantum.ibmQuantumErrorTrigger` | retired, hidden from the node panel; still installed so existing workflows keep running. Use the trigger above with `statusFilter: failedOrCanceled` instead |
+| IBM Quantum Error (Unofficial) Trigger | `n8n-nodes-ibm-quantum.ibmQuantumErrorTrigger` | retired, hidden from the node panel; still installed so existing workflows keep running. For NEW workflows use the trigger above with `statusFilter: failedOrCanceled`, but do not migrate an existing one without rewriting its expressions: the output shape differs, see below |
 
 The action node is on `typeVersion: 2`; use that for anything new. Version 1 still loads unchanged,
 and differs in exactly one parameter: the session mode is `mode` on version 1 and `sessionMode` on
@@ -46,7 +46,7 @@ trigger nodes.
 | :-- | :-- | :-- | :-- |
 | `apiKey` | string (password) | none | IBM Cloud API key from https://cloud.ibm.com/iam/apikeys. Exchanged automatically for a short-lived IAM bearer token (POST https://iam.cloud.ibm.com/identity/token, grant type `urn:ibm:params:oauth:grant-type:apikey`). n8n caches the token and refreshes it on 401. |
 | `instanceCrn` | string | none | Cloud Resource Name of the Qiskit Runtime instance, from https://quantum.cloud.ibm.com/instances. Starts with `crn:v1`. Sent as the `Service-CRN` header on every request. |
-| `region` | options: `us-east`, `eu-de` | `us-east` | Must match the region the instance was created in. Picks the API host: `us-east` maps to `https://quantum.cloud.ibm.com/api/v1`, `eu-de` maps to `https://eu-de.quantum.cloud.ibm.com/api/v1`. A mismatch yields 404s or an empty backends list. These are the only two regions IBM operates. |
+| `region` | options: `us-east`, `eu-de` | `us-east` | Must match the region the instance was created in. Picks the API host: `us-east` maps to `https://quantum.cloud.ibm.com/api/v1`, `eu-de` maps to `https://eu-de.quantum.cloud.ibm.com/api/v1`. A mismatch yields HTTP 404 with `code 1279`, naming the CRN: "Instance crn:... not found", plus a solution paragraph. Authentication is NOT the problem in that case: measured by calling the eu-de host with a us-east CRN, `GET /versions` still answered 200 with seven versions while every instance-scoped endpoint 404'd, so the IAM token carries across regions and only the instance is regional. These are the only two regions IBM operates. |
 | `apiVersion` | string | `2026-04-15` | Date sent as the `IBM-API-Version` header; selects the response schema. |
 
 The credential ships a connection test (GET `/backends`) that validates all four fields at once.
@@ -80,7 +80,6 @@ response is passed through unchanged.
 | `getAnalyticsByDate` | GET /analytics/usage_grouped_by_date | `analyticsFilters` | raw IBM body: a usage time series. The API requires `group_by`, and accepts only `instance`, so the node always sends that. |
 | `getAnalyticsFilters` | GET /analytics/filters | none | raw IBM body: the filter values this caller may use |
 | `getApiVersions` | GET /versions | none | raw IBM body: `{ versions: [{ version, status, sunset_date? }] }`. Use it to confirm which `IBM-API-Version` dates are still live before changing the credential. |
-| `setCostLimit` | PUT /instances/configuration | `instanceLimit` | `{ instanceLimit }` |
 
 `groupBy` options: `backend` (default), `instance`, `plan`, `subscription_id`, `user_id`.
 
@@ -89,8 +88,11 @@ comma-separated for several values, sent as repeated query keys), `intervalStart
 (dateTime, the reporting window), and `simulators` (boolean, default true; only the opt-out is sent
 because the API already defaults to true).
 
-`instanceLimit` is the total runtime seconds the instance may spend before IBM cancels running jobs
-with "Ran too long". Zero, or any non-positive value, sends an explicit `null` and removes the limit.
+There is no operation for WRITING the instance cost limit. `setCostLimit` shipped until 0.5.0 and
+was removed: IBM deprecated `PUT /instances/configuration` and it no longer answers, hanging for
+about 180 seconds before the connection aborts, reproduced outside the node with a plain HTTP call
+while `GET` on the same path returned 200 in under a second. Read the current ceiling with
+`getConfiguration` or `getInstance`; set it on the IBM Cloud console.
 
 ### Resource: `backend`
 
@@ -98,7 +100,7 @@ with "Ran too long". Zero, or any non-positive value, sends an explicit `null` a
 | :-- | :-- | :-- |
 | `list` (default) | none | raw IBM body: `{ devices: [ { name, qubits, is_simulator, status: { name }, queue_length, ... } ] }` |
 | `getConfiguration` | `backendName` (string, required) | raw IBM body; includes `basis_gates` (the native gate set) and the coupling map |
-| `getDefaults` | `backendName` (string, required) | raw IBM body: default settings and calibration data. Many devices have none: IBM answers with an empty body, which the node reports as `{}` rather than passing a null item into the workflow. Verified against ibm_marrakesh. |
+| `getDefaults` | `backendName` (string, required) | raw IBM body in principle, but in practice always empty: IBM answers with the literal `null`, content-length 4, which the node reports as `{}` rather than passing a null item into the workflow. Measured on all three devices this account can reach (ibm_fez, ibm_kingston, ibm_marrakesh) and confirmed outside the node with a direct HTTP call, against 607338 bytes from `getProperties` on the same backend. |
 | `getProperties` | `backendName` (string, required) | raw IBM body: calibration data (T1/T2, gate errors, readout errors) |
 | `getStatus` | `backendName` (string, required) | raw IBM body: operational state and queue length |
 | `getLeastBusy` | `minQubits` (number, default 0; 0 disables the filter), `includeSimulators` (boolean, default false) | `{ leastBusy: string\|null, queueLength: number\|null, candidates: [{ name, queueLength, qubits, status }] }` |
@@ -155,8 +157,8 @@ Shared by all three:
 | :-- | :-- | :-- | :-- |
 | `backend` | string, required | none | Device that runs the circuit. The circuit must already be ISA (transpiled) for THIS backend; see "Hardware reality" below. |
 | `circuitFormat` | options `qasm3` or `qpy` | `qasm3` | Which field below carries the circuit. A workflow saved before this parameter existed has no value stored and behaves as `qasm3`. |
-| `qasm3` | string, required when format is `qasm3` | none | The OpenQASM 3 circuit. Typically an expression, e.g. `={{ $('Build').item.json.qasm3 }}`. Must start with an `OPENQASM 3` header or the node rejects it locally, before any quota is spent. |
-| `qpyCircuit` | string, required when format is `qpy` | none | The circuit as QPY that is **zlib compressed and then base64 encoded**. IBM decompresses on arrival, so base64 of the raw QPY bytes is rejected: submitting that live failed with reason code 1603, IBM having tried to read the base64 text as QASM. The node validates a real zlib header locally (first byte 0x78, header divisible by 31) and sends the value inside the wrapper the official client uses, `{"__type__": "QuantumCircuit", "__value__": <value>}`, rather than as a bare string. Produce it in Python with `qiskit.qpy.dump(circuit, buffer)` then `base64.b64encode(zlib.compress(buffer.getvalue()))`. |
+| `qasm3` | string OR array of strings, required when format is `qasm3` | none | The OpenQASM 3 circuit. Typically an expression, e.g. `={{ $('Build').item.json.qasm3 }}`. Must start with an `OPENQASM 3` header or the node rejects it locally, before any quota is spent. **An expression resolving to an ARRAY submits every circuit in one job**, one PUB each, sharing the same `shots`, `parameters`, `observables` and `precision`. A job carries about 2 QPU seconds of fixed overhead regardless of its circuits, measured repeatedly on ibm_fez, so a batch of 5 costs that once instead of five times. Every entry is validated; the node sends at most 100 in one job, its own bound rather than IBM's. An empty array is refused. |
+| `qpyCircuit` | string OR array of strings, required when format is `qpy` | none | The circuit as QPY that is **zlib compressed and then base64 encoded**. IBM decompresses on arrival, so base64 of the raw QPY bytes is rejected: submitting that live failed with reason code 1603, IBM having tried to read the base64 text as QASM. The node validates a real zlib header locally (first byte 0x78, header divisible by 31) and sends the value inside the wrapper the official client uses, `{"__type__": "QuantumCircuit", "__value__": <value>}`, rather than as a bare string. Produce it in Python with `qiskit.qpy.dump(circuit, buffer)` then `base64.b64encode(zlib.compress(buffer.getvalue()))`. Accepts an array on the same terms as `qasm3`; each entry is wrapped separately. |
 | `logLevel` | options `''`, `critical`, `error`, `warning`, `info`, `debug` | `''` | Sent as `log_level`; raises the verbosity IBM records, readable later with Get Logs. Omitted when empty. |
 | `submitSessionId` | string | `''` | Session or batch ID from Session Create; runs the job inside that reservation. Sent as top-level `session_id`. |
 | `maxCost` | number | 0 | Maximum runtime seconds before IBM cancels the job, sent as `cost`. Zero omits the field and lets the program decide. IBM allows at most 10800 (3 hours) and the node clamps to that. Worth setting on the Open plan, where the whole allowance is 600 seconds. |
@@ -196,8 +198,13 @@ is the raw IBM body. Submission returns immediately; the job runs asynchronously
 to IBM), `layerPairDepths` (comma-separated integers, sent as the array `layer_pair_depths`) and
 `twirlingStrategy` (`active`, `active-accum`, `active-circuit`, `all`). The program characterises
 the noise on the backend's entangling layers and returns learned Pauli-Lindblad error channels
-rather than counts, so read it with Get Results and inspect `raw`. Raising the randomizations and
-shots is what makes a learning job expensive, which matters on the Open plan.
+rather than counts. Build its circuit with `numClbits: 0`: the learner does not measure the
+circuit, and a classical register makes IBM reject anything that splits into more than one
+entangling layer, with "ClassicalRegister with name 'c' appears in multiple layers with different
+sizes". One layer survives, so this only appears once the circuit grows. The node emits a warning
+when the QASM it is handed declares one. Get Results parses those into one `noiseLearner` pub per learned layer, and the
+full body stays in `raw`. Raising the randomizations and shots is what makes a learning job
+expensive, which matters on the Open plan.
 
 A QPY circuit is never sent as a plain string: wherever a PUB or `circuits` entry carries one, it
 appears as `{"__type__": "QuantumCircuit", "__value__": "<base64 of zlib-compressed QPY>"}`.
@@ -253,7 +260,7 @@ Output: raw IBM body, including the cursors for the next and previous pages.
 | :-- | :-- | :-- |
 | `create` (default) | `sessionMode` on typeVersion 2 (`mode` on typeVersion 1): `batch` default or `dedicated`; `sessionBackend` (string, required); `maxTtl` (seconds, default 28800; non-positive omits the field and lets IBM decide) | `{ sessionId, mode, backend, response }` |
 | `get` | `sessionId` (required) | raw IBM body |
-| `setAccepting` | `sessionId`, `acceptingJobs` (boolean, default true) | `{ sessionId, acceptingJobs }` |
+| `setAccepting` | `sessionId`, `acceptingJobs` (boolean, default true) | `{ sessionId, acceptingJobs }`. Sending false ENDS the session, it does not pause it: IBM moves it to `state: "closed"` with `state_reason: "session_closed_early"` at once when nothing is running, and sending true afterwards flips `accepting_jobs` back without reopening it. |
 | `close` | `sessionId` | `{ sessionId, closed: true }` |
 
 Whatever the parameter is called in the UI, the value is always sent to IBM as `mode`.
@@ -288,7 +295,18 @@ so `$json.id`, `$json.backend` and `$json.state` keep working.
 `ibmQuantumErrorTrigger` is retired. It is marked `hidden`, so it no longer appears in the node
 panel, but it stays registered and any saved workflow using it keeps polling unchanged. Do not
 add it to new workflows; use `ibmQuantumTrigger` with `statusFilter: failedOrCanceled`, which
-matches identically and emits the same reason fields. Its parameters remain `errorFilter`
+matches the same jobs and emits the same three reason fields. It is NOT a drop-in replacement
+in a saved workflow, because the two nodes shape their output differently:
+
+- the job ID is `jobId` here and `id` on the main trigger;
+- `status` here is always lowercased by `extractJobStatus`, while the main trigger spreads IBM's
+  job unchanged, so its `status` keeps IBM's casing (`Cancelled`, `Failed`) and is missing entirely
+  if IBM omits the field;
+- the raw job sits under `job` here and is spread across the top level on the main trigger.
+
+`reason`, `reasonCode` and `reasonSolution` are identical on both. The payloads are deliberately
+left alone, since changing either would break workflows already running on it. Its parameters
+remain `errorFilter`
 (options: `any` default meaning failed or canceled, `failed`, `canceled`), plus the same
 `limit` and `tagFilter`.
 
@@ -373,7 +391,8 @@ terminal status or `maxWait`. Outcomes:
 - Completed: `{ jobId, status: "completed", pubCount, pubs, resultsAvailable?, raw }`.
   `resultsAvailable: false` appears only when IBM answered with no result body at all, which it
   documents as a 204 "Job's final result not found". Without it that case looked identical to a
-  completed job that produced zero pubs.
+  completed job that produced zero pubs. A noise learner body counts as present even though it
+  carries no `results` key.
 
 Each entry in `pubs`:
 - Sampler: `{ type: "sampler", register, numBits, shots, counts, metadata, unparsedSamples? }`.
@@ -384,6 +403,15 @@ Each entry in `pubs`:
   counts total below shots.
 - Estimator: `{ type: "estimator", evs, stds, ensembleStandardError, metadata }`, the expectation
   value or values matching the observables submitted.
+- Noise learner: `{ type: "noiseLearner", qubits, generators, ratesEncoded, circuitEncoded }`, one
+  entry per learned layer. This primitive answers on a different shape: its payload arrives under
+  `data` rather than `results`, so it has no PUBs and no classical registers, and `registerName` is
+  ignored for it. `generators` is the plain Pauli list, e.g. `["IX", "IY", ..., "ZZ"]`, and
+  `ratesEncoded` holds one rate per generator in the same order, as base64 of a zlib-compressed
+  NumPy float64 array. It is passed through rather than decoded, because inflating it needs `zlib`,
+  which the community-node import allowlist does not permit. `circuitEncoded` is the layer as QPY,
+  passed through for the same reason. Both decode with `zlib.inflate` outside n8n, or by handing the
+  raw value to qiskit-ibm-runtime. The full body stays in `raw`.
 
 `raw` is the untouched IBM response if deeper fields are needed. `registerName` forces reading a
 specific classical register when a circuit defines several. If the named register is not in the
@@ -419,7 +447,7 @@ Common failures:
 | symptom | cause and fix |
 | :-- | :-- |
 | 401 or IAM token errors | API key wrong, revoked or expired; regenerate it at cloud.ibm.com/iam/apikeys |
-| 404 or empty backends list | credential `region` does not match the instance CRN's region |
+| 404 or empty backends list, `code 1279` "Instance crn:... not found" | credential `region` does not match the instance CRN's region. Authentication is fine; only the instance is regional. `getApiVersions` still works, because `/versions` is not instance-scoped |
 | job fails, reason_code 1517 | circuit not ISA for that backend; transpile or build natively |
 | "gate twirling does not support fractional gates" | `twirlingGates` on with a parametrised rx or rzz; turn it off |
 | Estimator submit rejected | observables length does not match the qubit count, or invalid Pauli letters |
