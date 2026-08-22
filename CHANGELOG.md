@@ -10,7 +10,7 @@ All notable changes to this package are documented in this file.
 - **A warning when a circuit calls `rzz` without defining it.** `rzz` is in the Heron basis, so the
   ISA scan passes it and the node said nothing either way. Two jobs on `ibm_fez` settled what
   actually happens. The bare call, which is what the palette would emit, comes back Failed with
-  reason code 1603, `gate 'rzz' is not defined`: `stdgates.inc` has no definition for it, so IBM
+  a rejection naming `gate 'rzz' is not defined`: `stdgates.inc` has no definition for it, so IBM
   refuses the program before the target is ever consulted. The same gate carrying the
   `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` block that Qiskit's exporter writes completed
   and returned 64 of 64 shots on `00`, the correct reading for a diagonal phase gate on the ground

@@ -191,8 +191,9 @@ in basis. The first check covers an OpenQASM 3 circuit using instructions outsid
 (cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier). Qiskit Runtime does not
 transpile, so such a job is accepted, queued and then fails; the warning says so at submit time and
 never blocks the request. A second warning covers `rzz` called without a definition: it is in the
-basis, but `stdgates.inc` does not define it, so IBM fails the job with reason code 1603, `gate 'rzz'
-is not defined`. Carrying Qiskit's own `gate rzz` block, the same circuit completes and is not
+basis, but `stdgates.inc` does not define it, so IBM fails the job naming `gate 'rzz' is not
+defined`. Do not match on the reason code: the identical program returned 1506 and 1603 on the same
+device thirteen hours apart, so only the message is stable. Carrying Qiskit's own `gate rzz` block, the same circuit completes and is not
 warned about. A third check covers a two qubit gate landing on a pair the backend does not couple,
 read from `coupling_map`: both gates can be perfectly in basis and it still fires. QPY is
 compressed, so it is not inspected. `response`
@@ -347,7 +348,7 @@ Emitted program header: `OPENQASM 3.0;` then `include "stdgates.inc";` then `qub
 
 Angles are radians. `rzz` is the one Heron basis gate deliberately NOT in the palette, because the
 palette writes bare calls and `stdgates.inc` has no definition for it: the emitted
-`rzz q[0], q[1];` comes back Failed with reason code 1603, `gate 'rzz' is not defined`, measured on
+`rzz q[0], q[1];` comes back Failed naming `gate 'rzz' is not defined`, measured on
 ibm_fez. Hand-written OpenQASM carrying Qiskit's own `gate rzz` block runs on the same device.
 `sx` IS in the palette as of 0.5.0. It was left out on the belief that it had no OpenQASM 3 spelling
 avoiding the builtin `U`, which is wrong: `stdgates.inc` defines it, Qiskit's own exporter writes the

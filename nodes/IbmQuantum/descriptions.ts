@@ -6,7 +6,9 @@ import type { INodeProperties } from 'n8n-workflow';
 // letting someone find out from a job. The basis was read live from all three devices:
 // cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier as instructions. rzz is the one
 // basis gate the palette still does not offer, because stdgates.inc has no definition for it and the
-// palette writes bare calls: IBM fails such a job with reason code 1603, `gate 'rzz' is not defined`.
+// palette writes bare calls: IBM fails such a job, naming `gate 'rzz' is not defined`. The reason
+// code is not stable, so do not match on it: the identical program returned 1506 in the morning and
+// 1603 in the evening of the same day on the same device.
 // Supplied as hand-written OpenQASM carrying Qiskit's own `gate rzz` block, it runs.
 const GATE_OPTIONS = [
 	{

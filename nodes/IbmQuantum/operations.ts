@@ -548,7 +548,7 @@ function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDat
 // `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` ahead of the call, completed and returned
 // 64/64 shots on `00`, the correct reading for a diagonal phase gate on |00>. What fails is the
 // bare call with no definition, since stdgates.inc does not define rzz: that comes back Failed with
-// reason_code 1603, `gate 'rzz' is not defined`. The distinction is the definition, not the gate,
+// a rejection naming `gate 'rzz' is not defined`. The distinction is the definition, not the gate,
 // so it is handled by undefinedGateWarnings rather than by dropping rzz from the basis.
 const ISA_INSTRUCTIONS = new Set([
 	'cz',
@@ -686,7 +686,9 @@ function isaWarnings(format: string, source: string, backend: string): string[] 
 
 // rzz is in the device basis, so the ISA scan passes it, but stdgates.inc does not define it. A
 // circuit that calls it without carrying its own `gate rzz` block therefore fails validation with
-// reason_code 1603, `gate 'rzz' is not defined`, measured on ibm_fez. The Qiskit export always
+// a rejection naming `gate 'rzz' is not defined`, measured on ibm_fez. Do not match on the reason
+// code: the identical program returned 1506 at 04:37 UTC and 1603 at 17:29 UTC the same day, on the
+// same device, so IBM changes it. The message is the stable part. The Qiskit export always
 // includes that block and completes, so the definition is what separates the two cases, and only
 // the missing one is worth a warning. The Circuit Build palette cannot produce this: it omits rzz
 // precisely because it writes bare calls with no definitions.
