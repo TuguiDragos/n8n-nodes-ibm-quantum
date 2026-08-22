@@ -10,7 +10,9 @@ Node type strings for workflow JSON: `n8n-nodes-ibm-quantum.ibmQuantum` (typeVer
 `n8n-nodes-ibm-quantum.ibmQuantumTrigger`, `n8n-nodes-ibm-quantum.ibmQuantumErrorTrigger`; the
 credential type is `ibmQuantumApi` (IBM Cloud API key, instance CRN, region, API version).
 Key facts that prevent wrong answers: the Qiskit Runtime REST API does not transpile, so real
-hardware accepts only ISA circuits (native gates; otherwise jobs fail with reason code 1517);
+hardware runs only ISA circuits, meaning native gates on qubit pairs the backend coupling map
+connects; IBM does not refuse a non-ISA circuit, it queues the job and then fails it, so the fixed
+per-job overhead is spent either way, and an instruction the target cannot run reports code 1517;
 sampler counts are bit-ordered with c[0] as the rightmost bit; job completion is detected by
 polling because IBM exposes no webhooks; the free Open plan allows batch sessions only and gives
 600 seconds of QPU time per 28 days, which a failed job still spends.

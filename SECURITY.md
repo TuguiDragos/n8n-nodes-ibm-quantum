@@ -26,7 +26,7 @@ No telemetry, no analytics, no third party of any kind. Every request the node i
 
 ### What gets written down
 
-The node itself never touches the filesystem. The polling triggers keep a cursor, the ids and timestamps of the jobs they have already seen, in n8n's own workflow static data, so a poll does not emit the same job twice. That cursor holds no credentials.
+The node itself never touches the filesystem. The polling triggers keep a cursor, the ids of the jobs they have already seen, in n8n's own workflow static data, so a poll does not emit the same job twice. That cursor holds no credentials.
 
 ## Reporting a vulnerability
 

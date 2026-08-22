@@ -4,7 +4,10 @@ import type { INodeProperties } from 'n8n-workflow';
 // circuit built only from the 'runs as-is' gates needs no toolchain, and anything else is
 // accepted, queued and then failed minutes later. Saying so in the dropdown is cheaper than
 // letting someone find out from a job. The basis was read live from all three devices:
-// cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier as instructions.
+// cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier as instructions. rzz is the one
+// basis gate the palette still does not offer, because stdgates.inc has no definition for it and the
+// palette writes bare calls: IBM fails such a job with reason code 1603, `gate 'rzz' is not defined`.
+// Supplied as hand-written OpenQASM carrying Qiskit's own `gate rzz` block, it runs.
 const GATE_OPTIONS = [
 	{
 		name: 'Barrier',
@@ -765,7 +768,7 @@ export const nodeProperties: INodeProperties[] = [
 		required: true,
 		default: '',
 		description:
-			'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile and rejects non-native circuits. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
+			'Backend that will run the circuit. The circuit must already be transpiled (ISA) for this backend; the Qiskit Runtime API does not transpile. It does not reject a non-native circuit either: it accepts the job, queues it, and fails it minutes later, charging about two seconds of QPU time. The status and queue shown in the list are read once when the node opens; use Refresh List in the field menu to update them. Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>.',
 		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 	{
@@ -815,7 +818,7 @@ export const nodeProperties: INodeProperties[] = [
 		default: '{}',
 		placeholder: 'e.g. { "theta": 1.5708 }',
 		description:
-			'Optional bindings for a parametrized circuit, as a JSON object mapping parameter names to values (or arrays of values). Leave empty for a fixed circuit.',
+			'Optional bindings for a parametrized circuit. Either a JSON object mapping parameter names to values, such as {"theta": 3.14159}, or a bare array of values in the order the circuit declares them, such as [3.14159]. Both were verified to run; the array is simpler for a single parameter. Leave empty for a fixed circuit.',
 		displayOptions: { show: { resource: ['job'], operation: SUBMIT_OPS } },
 	},
 	{
@@ -900,7 +903,7 @@ export const nodeProperties: INodeProperties[] = [
 		typeOptions: { minValue: 0, maxValue: 10800 },
 		default: 0,
 		description:
-			'Maximum runtime seconds this job may consume before IBM cancels it. Zero lets the program decide. IBM allows at most 10800 (three hours) and caps anything higher. On the Open plan, where the whole allowance is 600 seconds per 28 days, this stops one runaway job from spending it.',
+			'Maximum runtime seconds this job may consume before IBM cancels it. IBM allows at most 10800 (three hours) and caps anything higher. Zero omits the field, and IBM then stamps the job with the plan maximum, which on the Open plan is the entire 600 second allowance for the 28 day window. Set a real number to stop one runaway job from spending all of it.',
 		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 	{
@@ -928,7 +931,7 @@ export const nodeProperties: INodeProperties[] = [
 		type: 'json',
 		default: '{}',
 		description:
-			'Advanced JSON options passed straight to the primitive, for example {"default_shots": 4096}. Most workflows can leave this as {}. See the IBM Qiskit Runtime primitive options documentation.',
+			'Advanced JSON options passed straight to the primitive options block, for example {"environment": {"log_level": "DEBUG"}}. Most workflows can leave this as {}. Anything the fields above already control wins over what is written here: the Shots field is sent with the circuit and overrides default_shots, and the three error suppression toggles overwrite their own keys. See the IBM Qiskit Runtime primitive options documentation.',
 		displayOptions: { show: { resource: ['job'], operation: ALL_SUBMIT_OPS } },
 	},
 
@@ -1059,7 +1062,7 @@ export const nodeProperties: INodeProperties[] = [
 		typeOptions: { minValue: 1 },
 		default: 300,
 		description:
-			'Maximum seconds to wait for the job to finish. Real hardware queues can be long, so raise this for production runs or poll separately with Get Status.',
+			'Maximum seconds to wait for the job to finish. Reaching it is not an error: the node returns the item with timedOut set to true and the job keeps running on IBM, so read it later with Get Results. Real hardware queues can be long, so raise this for production runs or poll separately with Get Status.',
 		displayOptions: { show: { resource: ['job'], operation: ['getResults'] } },
 	},
 	{

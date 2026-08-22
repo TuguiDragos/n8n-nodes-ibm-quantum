@@ -1,9 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { handleJob, MAX_CIRCUITS_PER_JOB } from '../nodes/IbmQuantum/operations';
+import {
+	coupledNeighbours,
+	handleJob,
+	MAX_CIRCUITS_PER_JOB,
+	uncoupledPairs,
+	multiQubitOperands,
+} from '../nodes/IbmQuantum/operations';
 import { makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 const QASM = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nx q[0];';
+
+// A submit carrying a two-qubit gate first reads the backend's coupling map, so the job POST is not
+// always the first call. Find it rather than assume its position.
+const jobPost = (requests: HttpCall[]) =>
+	requests.find((call) => call.method === 'POST' && String(call.url).endsWith('/jobs')) as HttpCall;
 
 function submit(operation: 'submitSampler' | 'submitEstimator', params: Record<string, unknown>) {
 	const { ctx, requests } = makeExecuteContext({
@@ -12,8 +23,8 @@ function submit(operation: 'submitSampler' | 'submitEstimator', params: Record<s
 	});
 	return handleJob.call(ctx, TEST_CTX, operation, 0).then((result) => ({
 		result,
-		body: requests[0]?.body as Record<string, unknown>,
-		call: requests[0] as HttpCall,
+		body: jobPost(requests as HttpCall[])?.body as Record<string, unknown>,
+		call: jobPost(requests as HttpCall[]),
 	}));
 }
 
@@ -29,7 +40,11 @@ describe('submitJob request body (TEST-01)', () => {
 		});
 		expect(body.session_id).toBeUndefined();
 		expect((body.params as Record<string, unknown>).options).toBeUndefined();
-		expect(result).toMatchObject({ jobId: 'job-123', backend: 'ibm_kingston', primitive: 'sampler' });
+		expect(result).toMatchObject({
+			jobId: 'job-123',
+			backend: 'ibm_kingston',
+			primitive: 'sampler',
+		});
 	});
 
 	it('builds a minimal Estimator body with resilience_level and a two-item PUB', async () => {
@@ -47,9 +62,10 @@ describe('submitJob request body (TEST-01)', () => {
 				params: { backend: 'ibm_kingston', qasm3: QASM, ...params },
 				http: () => ({ id: 'nl-1' }),
 			});
-			return handleJob
-				.call(ctx, TEST_CTX, 'submitNoiseLearner', 0)
-				.then((result) => ({ result, body: requests[0]?.body as Record<string, unknown> }));
+			return handleJob.call(ctx, TEST_CTX, 'submitNoiseLearner', 0).then((result) => ({
+				result,
+				body: jobPost(requests as HttpCall[])?.body as Record<string, unknown>,
+			}));
 		};
 
 		it('sends bare circuits rather than PUBs, and version 2', async () => {
@@ -96,9 +112,9 @@ describe('submitJob request body (TEST-01)', () => {
 		});
 
 		it('rejects a non-numeric layer depth instead of sending it', async () => {
-			await expect(
-				learn({ noiseLearnerOptions: { layerPairDepths: '0, two' } }),
-			).rejects.toThrow(/Layer Pair Depths/);
+			await expect(learn({ noiseLearnerOptions: { layerPairDepths: '0, two' } })).rejects.toThrow(
+				/Layer Pair Depths/,
+			);
 		});
 
 		it('shares the job envelope with the other programs', async () => {
@@ -253,7 +269,10 @@ describe('submitJob request body (TEST-01)', () => {
 	});
 
 	it('sends cleaned tags and the private flag only when set', async () => {
-		const tagged = await submit('submitSampler', { jobTags: ' vqe , experiment-7,, ', privateJob: true });
+		const tagged = await submit('submitSampler', {
+			jobTags: ' vqe , experiment-7,, ',
+			privateJob: true,
+		});
 		expect(tagged.body.tags).toEqual(['vqe', 'experiment-7']);
 		expect(tagged.body.private).toBe(true);
 
@@ -339,7 +358,8 @@ describe('a list of circuits becomes one job with several PUBs', () => {
 			http: () => ({ id: 'job-9' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitNoiseLearner', 0);
-		const params = (requests[0].body as Record<string, unknown>).params as Record<string, unknown>;
+		const params = (jobPost(requests as HttpCall[]).body as Record<string, unknown>)
+			.params as Record<string, unknown>;
 		expect(params.circuits).toEqual([A, B]);
 	});
 
@@ -411,5 +431,164 @@ describe('a list of circuits becomes one job with several PUBs', () => {
 		for (const pub of pubs) {
 			expect(pub[0]).toMatchObject({ __type__: 'QuantumCircuit' });
 		}
+	});
+});
+
+// A cz between two qubits the chip does not connect passes every local guard, is accepted by IBM,
+// sits in the queue, and only then fails, charging the fixed per-job overhead. It is the last way a
+// circuit built entirely from the palette's runs-as-is gates can still fail. The real map on
+// ibm_fez has 352 entries and every one carries its own reverse, so it is read as undirected.
+describe('coupling map check', () => {
+	// A fragment of the real ibm_fez map, reverses included exactly as IBM publishes them.
+	const MAP = [
+		[0, 1],
+		[1, 0],
+		[1, 2],
+		[2, 1],
+		[2, 3],
+		[3, 2],
+		[3, 4],
+		[4, 3],
+		[3, 16],
+		[16, 3],
+	];
+	const HEAD = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[20] q;\nbit[20] c;\n';
+	const pairs = (body: string) => uncoupledPairs(multiQubitOperands(`${HEAD}${body}`), MAP);
+
+	it('accepts a coupled pair in either order', () => {
+		expect(pairs('cz q[0], q[1];')).toEqual([]);
+		expect(pairs('cz q[1], q[0];')).toEqual([]);
+	});
+
+	it('flags a pair the chip does not connect', () => {
+		expect(pairs('cz q[0], q[5];')).toEqual([[0, 5]]);
+		expect(pairs('cz q[0], q[1];\ncz q[2], q[7];')).toEqual([[2, 7]]);
+	});
+
+	// Anything wider is not a direct hardware interaction, and the ISA warning already covers it.
+	it('ignores statements on more than two qubits', () => {
+		expect(pairs('ccx q[0], q[5], q[9];')).toEqual([]);
+	});
+
+	it('has nothing to check without a two-qubit gate', () => {
+		expect(pairs('x q[0];')).toEqual([]);
+		expect(pairs('barrier q[0], q[9];')).toEqual([]);
+	});
+
+	// A map that cannot be read must produce no alarm rather than a false one.
+	it.each([[null], ['nope'], [[]], [[[0]]], [[['a', 'b']]]])(
+		'reports nothing for an unusable map: %s',
+		(map) => {
+			expect(uncoupledPairs([[0, 5]], map)).toEqual([]);
+		},
+	);
+
+	it('skips malformed entries but still uses the usable ones', () => {
+		expect(uncoupledPairs([[0, 5]], [[0, 1], 'x', [1], [2, 'a']])).toEqual([[0, 5]]);
+		expect(uncoupledPairs([[0, 1]], [[0, 1], 'x', [1], [2, 'a']])).toEqual([]);
+	});
+
+	it('lists the neighbours a qubit does have, sorted', () => {
+		expect(coupledNeighbours(3, MAP)).toEqual([2, 4, 16]);
+		expect(coupledNeighbours(99, MAP)).toEqual([]);
+		expect(coupledNeighbours(0, null)).toEqual([]);
+		expect(coupledNeighbours(0, [[0], 'x'])).toEqual([]);
+	});
+
+	describe('on the submit path', () => {
+		const CZ = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[20] q;\nbit[20] c;\ncz q[0], q[5];';
+		const OK = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[20] q;\nbit[20] c;\ncz q[0], q[1];';
+		const ONE = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[1] q;\nbit[1] c;\nx q[0];';
+
+		const run = (qasm3: unknown, respond?: (call: HttpCall) => unknown) => {
+			const { ctx, requests } = makeExecuteContext({
+				params: { backend: 'ibm_fez', qasm3, shots: 16 },
+				http:
+					respond ??
+					((call: HttpCall) =>
+						String(call.url).endsWith('/configuration') ? { coupling_map: MAP } : { id: 'job-1' }),
+			});
+			return handleJob
+				.call(ctx, TEST_CTX, 'submitSampler', 0)
+				.then((result) => ({ result, requests: requests as HttpCall[] }));
+		};
+
+		it('warns, names both qubits, and says what qubit 0 does connect to', async () => {
+			const { result } = await run(CZ);
+			const warnings = (result as { warnings: string[] }).warnings;
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain('qubits 0 and 5');
+			expect(warnings[0]).toContain('ibm_fez');
+			expect(warnings[0]).toContain('Qubit 0 connects to 1');
+		});
+
+		// A qubit that appears nowhere in the map has no neighbours to suggest, so the message drops
+		// the hint rather than ending with a dangling "connects to".
+		it('omits the hint when the offending qubit has no neighbours at all', async () => {
+			const FAR =
+				'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[100] q;\nbit[100] c;\ncz q[99], q[5];';
+			const { result } = await run(FAR);
+			const warnings = (result as { warnings: string[] }).warnings;
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain('qubits 99 and 5');
+			expect(warnings[0]).not.toContain('connects to');
+			expect(warnings[0]).toMatch(/fail it\.$/);
+		});
+
+		it('stays silent for a coupled pair', async () => {
+			const { result } = await run(OK);
+			expect(result).not.toHaveProperty('warnings');
+		});
+
+		// The configuration call costs about a second, so it must not happen at all for a circuit
+		// that cannot possibly need it.
+		it('does not read the map when there is no two-qubit gate', async () => {
+			const { requests } = await run(ONE);
+			expect(requests.some((call) => String(call.url).endsWith('/configuration'))).toBe(false);
+			expect(requests).toHaveLength(1);
+		});
+
+		it('reads the map once for a whole list of circuits', async () => {
+			const { requests, result } = await run([CZ, CZ, OK]);
+			const configCalls = requests.filter((call) => String(call.url).endsWith('/configuration'));
+			expect(configCalls).toHaveLength(1);
+			// The same offending pair appears twice in the list and is reported once.
+			expect((result as { warnings: string[] }).warnings).toHaveLength(1);
+		});
+
+		// Reading the map is a courtesy. A submit must never fail because of it.
+		it('submits anyway when the map cannot be read', async () => {
+			const { result, requests } = await run(CZ, (call: HttpCall) => {
+				if (String(call.url).endsWith('/configuration')) throw new Error('backend unreachable');
+				return { id: 'job-1' };
+			});
+			expect(result).toMatchObject({ jobId: 'job-1' });
+			expect(result).not.toHaveProperty('warnings');
+			expect(requests.some((call) => call.method === 'POST')).toBe(true);
+		});
+
+		it('submits anyway when the map is missing from the response', async () => {
+			const { result } = await run(CZ, (call: HttpCall) =>
+				String(call.url).endsWith('/configuration') ? { n_qubits: 156 } : { id: 'job-1' },
+			);
+			expect(result).toMatchObject({ jobId: 'job-1' });
+			expect(result).not.toHaveProperty('warnings');
+		});
+
+		it('skips the map entirely for a QPY circuit, which cannot be read', async () => {
+			const { ctx, requests } = makeExecuteContext({
+				params: {
+					backend: 'ibm_fez',
+					circuitFormat: 'qpy',
+					qpyCircuit: 'eJwL9Az2dAn2dAYAC9gCVQ==',
+					shots: 16,
+				},
+				http: () => ({ id: 'job-1' }),
+			});
+			await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
+			expect(
+				(requests as HttpCall[]).some((call) => String(call.url).endsWith('/configuration')),
+			).toBe(false);
+		});
 	});
 });

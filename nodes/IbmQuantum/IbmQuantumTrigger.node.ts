@@ -48,6 +48,8 @@ export class IbmQuantumTrigger implements INodeType {
 				displayName: 'Trigger On',
 				name: 'statusFilter',
 				type: 'options',
+				description:
+					'Which finished jobs start the workflow. Only terminal states are considered, so a queued or running job never fires; the poll re-checks it later. Each job fires once, tracked by ID across polls.',
 				options: [
 					{
 						name: 'Any Terminal (Completed, Failed or Canceled)',

@@ -522,7 +522,7 @@ function readAdditionalOptions(this: IExecuteFunctions, itemIndex: number): IDat
 	if (parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) {
 		throw new NodeOperationError(
 			this.getNode(),
-			'Additional Options must be a JSON object, for example {"default_shots": 4096}.',
+			'Additional Options must be a JSON object, for example {"environment": {"log_level": "DEBUG"}}.',
 			{ itemIndex },
 		);
 	}
@@ -544,6 +544,12 @@ function buildPrimitiveOptions(this: IExecuteFunctions, itemIndex: number): IDat
 // delay and barrier among its supported instructions. Qiskit Runtime does NOT transpile: a circuit
 // using anything else is accepted, queued, and only then fails. The node cannot transpile either,
 // so it says so rather than letting the job fail minutes later.
+// rzz belongs here, measured on ibm_fez: the Qiskit export, which carries
+// `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` ahead of the call, completed and returned
+// 64/64 shots on `00`, the correct reading for a diagonal phase gate on |00>. What fails is the
+// bare call with no definition, since stdgates.inc does not define rzz: that comes back Failed with
+// reason_code 1603, `gate 'rzz' is not defined`. The distinction is the definition, not the gate,
+// so it is handled by undefinedGateWarnings rather than by dropping rzz from the basis.
 const ISA_INSTRUCTIONS = new Set([
 	'cz',
 	'id',
@@ -592,6 +598,79 @@ export function nonIsaInstructions(qasm3: string): string[] {
 	return [...found];
 }
 
+// Pairs the circuit acts on that the device does not physically couple. Only groups of exactly two
+// are checked: anything wider is not a direct hardware interaction and the ISA warning already
+// covers it. The map is read as undirected, which matches what IBM publishes: all 352 pairs on
+// ibm_fez carry their own reverse. An unreadable map yields no pairs rather than a false alarm.
+export function uncoupledPairs(operands: number[][], couplingMap: unknown): number[][] {
+	if (!Array.isArray(couplingMap)) return [];
+	const coupled = new Set<string>();
+	for (const entry of couplingMap) {
+		if (!Array.isArray(entry) || entry.length !== 2) continue;
+		const [a, b] = entry;
+		if (typeof a !== 'number' || typeof b !== 'number') continue;
+		coupled.add(`${a},${b}`);
+		coupled.add(`${b},${a}`);
+	}
+	if (coupled.size === 0) return [];
+	return operands.filter((group) => group.length === 2 && !coupled.has(`${group[0]},${group[1]}`));
+}
+
+// The neighbours a qubit does have, so the message can say what to use instead.
+export function coupledNeighbours(qubit: number, couplingMap: unknown): number[] {
+	if (!Array.isArray(couplingMap)) return [];
+	const near = new Set<number>();
+	for (const entry of couplingMap) {
+		if (!Array.isArray(entry) || entry.length !== 2) continue;
+		const [a, b] = entry;
+		if (a === qubit && typeof b === 'number') near.add(b);
+		if (b === qubit && typeof a === 'number') near.add(a);
+	}
+	return [...near].sort((x, y) => x - y);
+}
+
+// Warn when a two-qubit gate lands on a pair the chip does not connect. IBM accepts such a job,
+// queues it, and only then fails it, charging the fixed per-job overhead, so catching it here saves
+// both the wait and the quota. The configuration call costs about a second, so it is skipped
+// entirely for a circuit with no two-qubit gate, which is most of them. A failure to read the map
+// is never allowed to block a submit: the job goes out unwarned, exactly as it did before.
+async function couplingWarnings(
+	this: IExecuteFunctions,
+	ctx: RequestContext,
+	backend: string,
+	format: string,
+	sources: string[],
+): Promise<string[]> {
+	if (format === 'qpy') return [];
+	// One fetch for the whole submit, however many circuits it carries.
+	const operands = sources.flatMap(multiQubitOperands);
+	if (!operands.some((group) => group.length === 2)) return [];
+
+	let couplingMap: unknown;
+	try {
+		const config = await ibmQuantumApiRequest.call(
+			this,
+			ctx,
+			'GET',
+			`/backends/${pathSegment(backend)}/configuration`,
+		);
+		couplingMap = config.coupling_map;
+	} catch {
+		// Reading the map is a courtesy, not a precondition. The submit continues either way.
+		return [];
+	}
+
+	const bad = uncoupledPairs(operands, couplingMap);
+	if (bad.length === 0) return [];
+	// A batch of variants repeats the same offending pair, so report each one once.
+	return [...new Set(bad.map(([a, b]) => `${a},${b}`))].map((key) => {
+		const [a, b] = key.split(',').map(Number);
+		const near = coupledNeighbours(a, couplingMap);
+		const hint = near.length > 0 ? ` Qubit ${a} connects to ${near.join(', ')}.` : '';
+		return `Circuit puts a two-qubit gate on qubits ${a} and ${b}, which ${backend} does not couple. IBM will accept the job and then fail it.${hint}`;
+	});
+}
+
 // Warn, never block. IBM accepts a non-ISA circuit, queues it, and fails it minutes later with an
 // opaque message, so saying it up front costs nothing and saves the wait. QPY is compressed, so
 // only an OpenQASM 3 program can be inspected.
@@ -605,11 +684,31 @@ function isaWarnings(format: string, source: string, backend: string): string[] 
 	];
 }
 
+// rzz is in the device basis, so the ISA scan passes it, but stdgates.inc does not define it. A
+// circuit that calls it without carrying its own `gate rzz` block therefore fails validation with
+// reason_code 1603, `gate 'rzz' is not defined`, measured on ibm_fez. The Qiskit export always
+// includes that block and completes, so the definition is what separates the two cases, and only
+// the missing one is worth a warning. The Circuit Build palette cannot produce this: it omits rzz
+// precisely because it writes bare calls with no definitions.
+export function undefinedGateWarnings(format: string, source: string): string[] {
+	if (format === 'qpy') return [];
+	// Match the call, not the definition: `gate rzz(...)` is what supplies it.
+	const calls = /^\s*rzz\b/m.test(source.replace(/^\s*gate\s+rzz\b.*$/gm, ''));
+	if (!calls) return [];
+	if (/^\s*gate\s+rzz\b/m.test(source)) return [];
+	return [
+		"Circuit calls rzz but does not define it. rzz is in the IBM basis, yet stdgates.inc has no definition for it, so IBM fails the job with \"gate 'rzz' is not defined\". Include the gate rzz block that Qiskit's exporter writes, or express the interaction with cz and rz.",
+	];
+}
+
 // Count the statements that act on two or more qubits, which is what IBM groups into entangling
 // layers. barrier is excluded: it spans qubits without entangling them. Counted from the same
 // top-level scan as the ISA check, so a gate definition block cannot inflate the number.
-export function twoQubitStatements(qasm3: string): number {
-	let count = 0;
+// The qubit operands of every multi-qubit statement, in source order. Shared by the noise learner
+// warning, which only needs the count, and the coupling check, which needs the pairs themselves.
+// barrier is excluded: it spans qubits without entangling them.
+export function multiQubitOperands(qasm3: string): number[][] {
+	const found: number[][] = [];
 	let depth = 0;
 	for (const rawLine of qasm3.split('\n')) {
 		const line = rawLine.trim();
@@ -626,10 +725,16 @@ export function twoQubitStatements(qasm3: string): number {
 			continue;
 		}
 		// Distinct operands, so `cz q[0], q[0];` is not mistaken for a two-qubit statement.
-		const operands = new Set(line.match(/q\[\d+\]/g) ?? []);
-		if (operands.size >= 2) count += 1;
+		const operands = [...new Set(line.match(/q\[\d+\]/g) ?? [])];
+		if (operands.length >= 2) {
+			found.push(operands.map((operand) => Number(operand.slice(2, -1))));
+		}
 	}
-	return count;
+	return found;
+}
+
+export function twoQubitStatements(qasm3: string): number {
+	return multiQubitOperands(qasm3).length;
 }
 
 // A classical register the noise learner never uses. IBM splits the circuit into entangling layers
@@ -808,7 +913,13 @@ async function submitJob(
 	body.backend = backend;
 	body.params = params;
 
-	const warnings = collectWarnings(sources, (entry) => isaWarnings(format, entry, backend));
+	const warnings = [
+		...collectWarnings(sources, (entry) => [
+			...isaWarnings(format, entry, backend),
+			...undefinedGateWarnings(format, entry),
+		]),
+		...(await couplingWarnings.call(this, ctx, backend, format, sources)),
+	];
 	for (const warning of warnings) this.logger.warn(warning);
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);
@@ -880,10 +991,14 @@ async function submitNoiseLearnerJob(
 	body.backend = backend;
 	body.params = params;
 
-	const warnings = collectWarnings(sources, (entry) => [
-		...isaWarnings(format, entry, backend),
-		...noiseLearnerWarnings(format, entry),
-	]);
+	const warnings = [
+		...collectWarnings(sources, (entry) => [
+			...isaWarnings(format, entry, backend),
+			...undefinedGateWarnings(format, entry),
+			...noiseLearnerWarnings(format, entry),
+		]),
+		...(await couplingWarnings.call(this, ctx, backend, format, sources)),
+	];
 	for (const warning of warnings) this.logger.warn(warning);
 
 	const response = await ibmQuantumApiRequest.call(this, ctx, 'POST', '/jobs', body);

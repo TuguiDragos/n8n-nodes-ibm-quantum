@@ -41,6 +41,8 @@ export class IbmQuantumErrorTrigger implements INodeType {
 				displayName: 'Trigger On',
 				name: 'errorFilter',
 				type: 'options',
+				description:
+					'Which unsuccessful ending starts the workflow. A completed job never fires this node. Each job fires once, tracked by ID across polls.',
 				options: [
 					{ name: 'Canceled Only', value: 'canceled' },
 					{ name: 'Failed Only', value: 'failed' },

@@ -7,6 +7,34 @@ All notable changes to this package are documented in this file.
 
 ### Added
 
+- **A warning when a circuit calls `rzz` without defining it.** `rzz` is in the Heron basis, so the
+  ISA scan passes it and the node said nothing either way. Two jobs on `ibm_fez` settled what
+  actually happens. The bare call, which is what the palette would emit, comes back Failed with
+  reason code 1603, `gate 'rzz' is not defined`: `stdgates.inc` has no definition for it, so IBM
+  refuses the program before the target is ever consulted. The same gate carrying the
+  `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` block that Qiskit's exporter writes completed
+  and returned 64 of 64 shots on `00`, the correct reading for a diagonal phase gate on the ground
+  state. The node now warns about the undefined call and stays silent about the transpiled one, both
+  confirmed live through n8n. This replaces an earlier belief, recorded in this changelog and in the
+  README, that IBM rejected `rzz` outright with reason code 1506. Acting on that belief by dropping
+  `rzz` from the basis would have warned about a circuit that demonstrably runs.
+
+- **A warning when a two-qubit gate lands on a pair the chip does not connect.** Picking gates from
+  the basis is only half of building an ISA circuit; the qubits have to be adjacent as well. Until
+  now that was the last way a circuit built entirely from the palette's runs-as-is gates could still
+  fail, and it failed the expensive way: IBM accepts the job, queues it, and only then reports
+  `code 1517, the instruction cz on qubits (0, 5) is not supported by the target system`, charging
+  the fixed per-job overhead for the privilege. The node now reads `coupling_map` from the backend
+  configuration on submit and names the offending pair up front, along with the neighbours the first
+  qubit does have, so the fix is visible rather than guessed. Verified on `ibm_fez`: `cz q[0], q[1]`
+  completes with no warning, `cz q[0], q[5]` warns and then fails at IBM with exactly the predicted
+  qubits, and a single-qubit circuit issues no extra call at all. The map is read as undirected,
+  which matches what IBM publishes: all 352 pairs on that device carry their own reverse. The check
+  costs one GET of about a second, so it is skipped when the circuit has no two-qubit statement, and
+  read once per submit however many circuits it carries. It is skipped for QPY, which cannot be
+  inspected, and a map that cannot be read never blocks the submit: the job goes out unwarned,
+  exactly as before.
+
 - **The `sx` gate joins the palette, and the reason it was left out was wrong.** A Heron backend
   lists `sx` among its basis gates, and the palette excluded it on the belief that it had no
   OpenQASM 3 spelling avoiding the builtin `U`. It does: `stdgates.inc` defines it, and Qiskit's own
@@ -16,17 +44,20 @@ All notable changes to this package are documented in this file.
   the only single-qubit basis gate besides `x`, so without it a hand-written ISA circuit had to spell
   its Hadamard with a parametrised `rx`. That works on Heron but is a *fractional* gate, which
   Nighthawk processors do not offer at all and which is incompatible with gate twirling and with the
-  ZNE and PEC mitigation behind Estimator resilience level 2. `rzz` stays out: IBM's OpenQASM parser
-  rejects it outright with reason code 1506, confirmed again on `ibm_fez`.
+  ZNE and PEC mitigation behind Estimator resilience level 2. `rzz` stays out of the palette, but not for
+  the reason first recorded here: see the entry above, the gate is fine and the missing definition
+  is not.
 
 - **Every gate in the palette says whether IBM runs it untouched.** Qiskit Runtime does not
   transpile, so a circuit built from the wrong gates is accepted, queued, and failed minutes later.
   Sixteen of the twenty-five entries are in that category, which is most of the palette, and nothing
-  in the dropdown said so. Each option now carries a description: "Runs as-is" for the seven basis
-  gates plus measure and reset, "Transpile first" with the reason for the rest, and the two special
-  cases, `barrier` being a directive and `id` being accepted while emitting nothing. A test holds
-  those descriptions against the node's own ISA scanner, so a gate added later with the wrong blurb,
-  or a basis that changes, fails the build rather than shipping a tooltip that lies. Verified by
+  in the dropdown said so. Each option now carries a description: "Runs as-is" for five of the seven
+  basis gates plus measure and reset, "Transpile first" with the reason for the rest, and the two
+  special cases, `barrier` being a directive and `id` being accepted while emitting nothing. That is
+  seven entries rather than nine, because `id` is counted among the special cases and `rzz` is not in
+  the palette at all, for the reason given above. A test holds those descriptions against the node's
+  own ISA scanner, so a gate added later with the wrong blurb, or a basis that changes, fails the
+  build rather than shipping a tooltip that lies. Verified by
   mutation: claiming Hadamard runs as-is, adding a gate with no description, and blanking one all
   fail it.
 
@@ -141,7 +172,7 @@ All notable changes to this package are documented in this file.
   empty description, and `from-ai-parse-utils.js` attaches nothing when it is empty, so the
   parameter reaches the model unannotated. The action now carries the constraint instead, so an
   attached agent reads "Submit an already transpiled ISA circuit to the sampler primitive in IBM
-  Quantum". The other 31 actions were left alone: they read well to a human in the panel and carry
+  Quantum". The other 30 actions were left alone: they read well to a human in the panel and carry
   nothing a model needs to be warned about.
 
 - **The two triggers are now one.** The panel listed seven trigger entries built from two nodes, and
@@ -193,15 +224,31 @@ All notable changes to this package are documented in this file.
   there and is now covered by a test.
 
 - **The trigger event parameter is labelled "Trigger On"**, the name n8n's UI guidelines specify, and
-  its tooltip is gone because the same guideline asks for none. n8n builds the Triggers list from a
-  property named Event, Events or Trigger On; ours were called Status and On, so the panel fell back
-  to a single unnamed placeholder instead of listing the options. Only the label changed, the stored
-  parameter names are untouched.
+  its tooltip now says which jobs start the workflow rather than restating the label. n8n builds the
+  Triggers list from a property named Event, Events or Trigger On; ours were called Status and On, so
+  the panel fell back to a single unnamed placeholder instead of listing the options. 0.4.1 shipped a
+  tooltip that only echoed the field name. The main trigger now explains that only terminal states
+  count, so a queued or running job never fires and the next poll checks it again, and the error
+  trigger says a completed job never fires it. Both add that each job fires once, tracked by ID
+  across polls. The stored parameter names are untouched.
 - **The three listing operations are named "Get Many"**, which is what n8n's UX guidelines call the
   standard listing operation, and Job "List Tags" is now "Get Many Tags". The stored values are
   unchanged (`list`, `listTags`), so existing workflows keep working.
 - **Every operation now carries a description**, rendered under its name in the operation dropdown,
   and example placeholders use the `e.g.` prefix the guidelines ask for.
+- **Six field descriptions now say what IBM measurably does.** Backend on submit claimed the Qiskit
+  Runtime API rejects a circuit that is not native to the device. It does not reject it: it accepts
+  the job, queues it, and fails it minutes later, charging about two seconds of QPU time, which is
+  the whole reason the warnings above exist. Max Cost said zero lets the program decide; zero omits
+  the field, and IBM then stamps the job with the plan maximum, verified live as the Open plan's
+  entire 600 second allowance. Max Wait never said that reaching the limit is not an error: the node
+  returns the item with `timedOut` set to true while the job keeps running on IBM, to be read later
+  with Get Results. Additional Options offered `{"default_shots": 4096}` as its example, which
+  changes nothing, because Shots travels with the circuit and overrides it. And the two trigger
+  filters, Trigger On and its error-trigger counterpart, had no description at all, the only two
+  mechanical gaps in the node's 152 user-visible strings. Parameters now documents both accepted
+  shapes, the named object and the bare positional array, after both were run on hardware and
+  returned the same counts.
 - **Both `/instances/configuration` calls are marked deprecated in the code.** IBM's live OpenAPI
   spec flags GET and PUT on that path, in favour of the Resource Controller API. Both still answer.
   Account Get Instance already reads the same fields from `/instance`, which is not deprecated.
@@ -384,7 +431,7 @@ All notable changes to this package are documented in this file.
 
 ### Testing
 
-The suite goes from 276 to 647 tests, still at 100% statement, branch, function and line coverage.
+The suite goes from 276 to 669 tests, still at 100% statement, branch, function and line coverage.
 The new files cover ground that was unreachable before: `tests/input-guards.test.ts` for every
 parameter an expression can corrupt, `tests/node-execute.test.ts` for the node wrapper itself,
 `tests/isa-warning.test.ts` for the transpilation warning, and `tests/load-options.test.ts` for the
@@ -402,7 +449,12 @@ between the two triggers, so the comparison table in the README cannot drift awa
 `tests/operations-submit.test.ts` covers the circuit list: one PUB per entry, the empty list, the
 cap, validation of every entry rather than the first, deduplicated warnings, and QPY wrapping each
 entry separately. `tests/isa-warning.test.ts` covers the classical-register warning and the
-entangling-statement counter behind it.
+entangling-statement counter behind it, plus both halves of the `rzz` pair: the bare call that IBM
+refuses and the Qiskit form that completes, each naming the job id it was measured against, so a
+later attempt to drop `rzz` from the basis fails the build rather than shipping a warning about a
+working circuit. `tests/operations-submit.test.ts` covers the coupling map: an uncoupled pair, a
+coupled pair in either order, the neighbour hint, a map that cannot be read, and QPY, which is
+skipped.
 
 Behavioural equivalence with the pre-change code was proved rather than argued. The tree at the
 release baseline was built separately and the same inputs run through both, comparing the request
@@ -449,10 +501,10 @@ What ran, beyond every operation answering:
 - The heaviest job: 500,000 shots on 20 qubits with no cap, charged 130 seconds, returning 5.25 MB
   that the node decoded in 2.9 seconds into 626 distinct bitstrings summing to exactly 500,000.
 
-Ten claims this changelog makes were confirmed live for the first time: that the hardcoded basis gate
+Nine claims this changelog makes were confirmed live for the first time: that the hardcoded basis gate
 set matches all three devices; that IBM accepts at most 8 tags; that tag lengths count characters
-rather than UTF-16 units; that a cancelled job's results endpoint answers 204; that `rzz` fails as a
-parse error rather than a target error; that gate twirling rejects fractional gates while the other
+rather than UTF-16 units; that a cancelled job's results endpoint answers 204; that a
+bare `rzz` fails as a load error rather than a target error; that gate twirling rejects fractional gates while the other
 two toggles do not; that Max Cost really does make IBM cut a job; that the trigger tag filter is an
 AND; and that the Executor program cannot be driven without Qiskit.
 

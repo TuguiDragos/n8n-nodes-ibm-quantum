@@ -161,10 +161,10 @@ Shared by all three:
 | `qpyCircuit` | string OR array of strings, required when format is `qpy` | none | The circuit as QPY that is **zlib compressed and then base64 encoded**. IBM decompresses on arrival, so base64 of the raw QPY bytes is rejected: submitting that live failed with reason code 1603, IBM having tried to read the base64 text as QASM. The node validates a real zlib header locally (first byte 0x78, header divisible by 31) and sends the value inside the wrapper the official client uses, `{"__type__": "QuantumCircuit", "__value__": <value>}`, rather than as a bare string. Produce it in Python with `qiskit.qpy.dump(circuit, buffer)` then `base64.b64encode(zlib.compress(buffer.getvalue()))`. Accepts an array on the same terms as `qasm3`; each entry is wrapped separately. |
 | `logLevel` | options `''`, `critical`, `error`, `warning`, `info`, `debug` | `''` | Sent as `log_level`; raises the verbosity IBM records, readable later with Get Logs. Omitted when empty. |
 | `submitSessionId` | string | `''` | Session or batch ID from Session Create; runs the job inside that reservation. Sent as top-level `session_id`. |
-| `maxCost` | number | 0 | Maximum runtime seconds before IBM cancels the job, sent as `cost`. Zero omits the field and lets the program decide. IBM allows at most 10800 (3 hours) and the node clamps to that. Worth setting on the Open plan, where the whole allowance is 600 seconds. |
+| `maxCost` | number | 0 | Maximum runtime seconds before IBM cancels the job, sent as `cost`. IBM allows at most 10800 (3 hours) and the node clamps to that. Zero omits the field, and IBM then stamps the job with the plan maximum, verified live as the Open plan's entire 600 second allowance for the 28 day window. Set a real number to stop one runaway job from spending all of it. |
 | `jobTags` | string | `''` | Comma-separated tags stored on the job (max 8). The practical way to find jobs again: filter on them in Job Get Many, Workload Get Many and both triggers. |
 | `privateJob` | boolean | false | Marks the job private (inputs and results hidden from other collaborators, and deleted after reading). Needs a plan that supports private jobs. |
-| `additionalOptions` | json | `{}` | Escape hatch merged into the job's `options` object: the primitive options for Sampler and Estimator, the learner options for the noise learner. For example `{"default_shots": 4096}`. Must be a JSON object. |
+| `additionalOptions` | json | `{}` | Escape hatch merged into the job's `options` object: the primitive options for Sampler and Estimator, the learner options for the noise learner. For example `{"environment": {"log_level": "DEBUG"}}`. Fields above win over keys repeated here: `shots` travels with the circuit and overrides `default_shots`, and the three suppression toggles overwrite their own keys. Must be a JSON object. |
 
 Sampler and Estimator only. The noise learner takes bare circuits rather than PUBs, so it has no
 parameter bindings, and its options object is declared `additionalProperties: false`, so the three
@@ -172,7 +172,7 @@ error-suppression toggles below are never merged into it:
 
 | parameter | type | default | notes |
 | :-- | :-- | :-- | :-- |
-| `parameters` | json | `{}` | Bindings for a parametrized circuit: JSON object mapping parameter names to values or arrays, e.g. `{"theta": 1.5708}`. Empty string or `{}` means no bindings. |
+| `parameters` | json | `{}` | Bindings for a parametrized circuit: either a JSON object mapping parameter names to values or arrays, e.g. `{"theta": 1.5708}`, or a bare array of values in the order the circuit declares them, e.g. `[3.14159]`. Both shapes were verified live and return the same counts. Empty string or `{}` means no bindings. |
 | `dynamicalDecoupling` | boolean | false | Sends `options.dynamical_decoupling.enable = true`. Safe on any circuit. |
 | `twirlingGates` | boolean | false | Sends `options.twirling.enable_gates = true`. MUST stay off for circuits containing fractional gates (a parametrised `rx` or `rzz`, which includes anything Qiskit transpiles for a Heron processor); IBM fails the job with "gate twirling does not support fractional gates". |
 | `twirlingMeasure` | boolean | false | Sends `options.twirling.enable_measure = true`. No fractional-gate restriction. |
@@ -186,10 +186,16 @@ error-suppression toggles below are never merged into it:
 - `precision` (number, default 0): target precision; 0 means backend default.
 
 Submit output: `{ jobId, backend, primitive, sessionId: string|null, warnings?, response }` where
-`warnings` appears only when the OpenQASM 3 circuit uses instructions outside the IBM basis
+`warnings` gathers whatever the submit checks found, so it can appear for a circuit that is wholly
+in basis. The first check covers an OpenQASM 3 circuit using instructions outside the IBM basis
 (cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier). Qiskit Runtime does not
 transpile, so such a job is accepted, queued and then fails; the warning says so at submit time and
-never blocks the request. QPY is compressed, so it is not inspected. `response`
+never blocks the request. A second warning covers `rzz` called without a definition: it is in the
+basis, but `stdgates.inc` does not define it, so IBM fails the job with reason code 1603, `gate 'rzz'
+is not defined`. Carrying Qiskit's own `gate rzz` block, the same circuit completes and is not
+warned about. A third check covers a two qubit gate landing on a pair the backend does not couple,
+read from `coupling_map`: both gates can be perfectly in basis and it still fires. QPY is
+compressed, so it is not inspected. `response`
 is the raw IBM body. Submission returns immediately; the job runs asynchronously, so pair it with
 `getResults` or the trigger node.
 
@@ -211,8 +217,8 @@ appears as `{"__type__": "QuantumCircuit", "__value__": "<base64 of zlib-compres
 
 Request body sent: `{ program_id: "sampler"|"estimator"|"noise-learner", backend, params: {...},
 session_id?, tags?, private?, cost?, log_level? }`. For Sampler and Estimator, `params` is
-`{ version: 2, pubs: [pub], options?, resilience_level? }` and the node submits exactly one PUB per
-job: Sampler PUB is `[circuit, parameters, shots]`, Estimator PUB is
+`{ version: 2, pubs: [pub, ...], options?, resilience_level? }` and the node submits one PUB per
+circuit, so an array of circuits becomes an array of PUBs inside one job. Sampler PUB is `[circuit, parameters, shots]`, Estimator PUB is
 `[circuit, observables, parameters?, precision?]`. For the noise learner, `params` is
 `{ version: 2, circuits: [circuit], options? }`.
 
@@ -339,8 +345,10 @@ Emitted program header: `OPENQASM 3.0;` then `include "stdgates.inc";` then `qub
 | `reset` | 1 | 0 | `reset q[i];` | runs as-is |
 | `barrier` | any (empty means all) | 0 | `barrier q[i], q[j];` or `barrier q;` | directive, always fine |
 
-Angles are radians. `rzz` is the one Heron basis gate deliberately NOT in the palette: IBM's
-OpenQASM 3 parser rejects it outright with reason code 1506, verified on ibm_kingston and ibm_fez.
+Angles are radians. `rzz` is the one Heron basis gate deliberately NOT in the palette, because the
+palette writes bare calls and `stdgates.inc` has no definition for it: the emitted
+`rzz q[0], q[1];` comes back Failed with reason code 1603, `gate 'rzz' is not defined`, measured on
+ibm_fez. Hand-written OpenQASM carrying Qiskit's own `gate rzz` block runs on the same device.
 `sx` IS in the palette as of 0.5.0. It was left out on the belief that it had no OpenQASM 3 spelling
 avoiding the builtin `U`, which is wrong: `stdgates.inc` defines it, Qiskit's own exporter writes the
 bare `sx q[i];` for a transpiled circuit, and IBM runs it. Verified on ibm_fez: two in a row read 249
@@ -368,7 +376,14 @@ ISA circuit:
    parametrised `rx` in that identity. Both work on Heron, but `rx(pi/2)` is a fractional gate, and
    on Nighthawk processors (ibm_miami, ibm_berlin; Premium and Flex early access) the basis is
    `cz, id, rz, sx, x` with no fractional `rx` at all, so the `sx` form runs on both fleets while the
-   `rx` form does not. Fractional gates are also incompatible with gate twirling and
+   `rx` form does not. Adjacency matters as much as the gate set: a two-qubit gate must land on a
+   pair the device couples. On submit, the node reads `coupling_map` from the backend configuration
+   and warns about any pair that is not in it, naming the qubits and the neighbours the first one
+   does have. Verified on ibm_fez: `cz q[0], q[5]` is accepted by IBM, queued, and then failed with
+   code 1517, "the instruction cz on qubits (0, 5) is not supported by the target system", while
+   `cz q[0], q[1]` completes. The check costs one extra GET, is skipped when the circuit has no
+   two-qubit gate, is skipped for QPY, and never blocks a submit: if the map cannot be read the job
+   goes out unwarned. Fractional gates are also incompatible with gate twirling and
    with ZNE and PEC error mitigation, so avoid Estimator resilience level 2 on circuits containing
    a parametrised `rx`.
 2. Transpile locally with Qiskit (free, any plan, no live credentials needed):
@@ -563,8 +578,10 @@ verified installs no flag is needed.
   million total executions.
 - GET /jobs is capped at 200 results per call and GET /workloads at 50; the node clamps both.
 - Tags: at most 8 per job or filter.
-- One PUB per submitted job (the node's design). To run many parameter sets, use `parameters`
-  bindings with arrays, or several Submits inside a session.
+- Up to 100 circuits per submitted job, the node's own bound rather than IBM's, one PUB each,
+  sharing the same `shots`, `parameters`, `observables` and `precision`. Batching pays the roughly
+  two second per job overhead once instead of once per circuit. To run many parameter sets, pass
+  an array of circuits, use `parameters` bindings with arrays, or several Submits in a session.
 - Every request times out after 30 seconds, so a hung connection cannot stall an execution.
 - Get Results poll values are clamped to at least 1 second; defaults are a 5 second interval and a
   300 second maximum wait.
@@ -595,7 +612,7 @@ Bearer <IAM token>`, `Service-CRN: <instance CRN>`, `IBM-API-Version: <date>`. E
 `GET /jobs`, `GET /jobs/{id}`, `GET /jobs/{id}/results|logs|metrics`, `PUT /jobs/{id}/tags`,
 `POST /jobs/{id}/cancel`, `DELETE /jobs/{id}`, `GET /workloads`, `GET /tags`, `GET /versions`, `POST /sessions`,
 `GET /sessions/{id}`, `PATCH /sessions/{id}`, `DELETE /sessions/{id}/close`, `GET /instance`,
-`GET /instances/usage`, `GET /instances/configuration`, `PUT /instances/configuration`,
+`GET /instances/usage`, `GET /instances/configuration`,
 `GET /analytics/usage`, `GET /analytics/usage_grouped`, `GET /analytics/usage_grouped_by_date`,
 `GET /analytics/filters`. Array query parameters are sent as repeated keys (`tags=a&tags=b`);
 bracket encodings are silently ignored by IBM. Official API reference:

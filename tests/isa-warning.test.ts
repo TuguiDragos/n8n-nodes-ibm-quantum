@@ -12,6 +12,10 @@ import { makeExecuteContext, TEST_CTX } from './fakeContext';
 // (cz, id, rx, rz, rzz, sx, x), read live from ibm_kingston, ibm_fez and ibm_marrakesh, plus
 // measure, reset, delay and barrier among its supported instructions. A circuit using anything
 // else is accepted, queued, and only then fails, so the node says so at submit time.
+// rzz is in that basis and stays in it, measured on ibm_fez: the Qiskit export, which carries a
+// `gate rzz` block ahead of the call, completed and returned 64/64 shots on `00`. The bare call
+// with no definition is what fails, with reason_code 1603, so that case belongs to
+// undefinedGateWarnings and not to this scan.
 const HEAD = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nbit[2] c;\n';
 
 describe('nonIsaInstructions', () => {
@@ -21,6 +25,13 @@ describe('nonIsaInstructions', () => {
 				`${HEAD}x q[0];\nrx(0.5) q[0];\nrz(0.5) q[0];\nsx q[0];\nid q[1];\ncz q[0], q[1];\nrzz(0.5) q[0], q[1];`,
 			),
 		).toEqual([]);
+	});
+
+	// Pinned against a plausible-looking regression: rzz calls do fail when they arrive bare, so it
+	// is tempting to drop it from the basis. Job da4tpje1vhnc73fle760 on ibm_fez completed with a
+	// transpiled circuit using it, so removing it would warn about a circuit that demonstrably runs.
+	it('keeps rzz in the basis, which a live job confirmed', () => {
+		expect(nonIsaInstructions(`${HEAD}rzz(0.5) q[0], q[1];`)).toEqual([]);
 	});
 
 	// sx is in the Heron basis and was verified live, so a circuit built from the palette using it
@@ -39,9 +50,10 @@ describe('nonIsaInstructions', () => {
 		expect(nonIsaInstructions(`${HEAD}c[0] = measure q[0];`)).toEqual([]);
 	});
 
-	// Qiskit's exporter writes a definition block for anything outside stdgates, so a fully ISA
-	// circuit using rzz arrives with `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` in front of
-	// it. Reading those body lines reported "gate, cx" about a correct circuit.
+	// Qiskit's exporter writes a definition block for anything outside stdgates, so a circuit using
+	// rzz arrives with `gate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }` in front of it. Reading
+	// those body lines reported "gate, cx" about the definition rather than the one instruction the
+	// program actually issues.
 	it('ignores a gate definition block, which is not what the device runs', () => {
 		const withDefinition = `OPENQASM 3.0;
 include "stdgates.inc";
@@ -132,6 +144,31 @@ describe('the submit operations warn without blocking', () => {
 	it('uses singular wording for a single instruction', async () => {
 		const { out } = await submit('submitSampler', { qasm3: `${HEAD}h q[0];`, shots: 100 });
 		expect((out.warnings as string[])[0]).toContain('which is not in the IBM basis');
+	});
+
+	// Job da4tp43otlns739b97qg on ibm_fez: this exact circuit came back Failed with reason_code 1603,
+	// `gate 'rzz' is not defined`. The ISA scan cannot catch it, since rzz is genuinely in the basis.
+	it('warns when rzz is called with no definition, which IBM rejects', async () => {
+		const { out, warned } = await submit('submitSampler', {
+			qasm3: `${HEAD}rzz(0.5) q[0], q[1];`,
+			shots: 100,
+		});
+		expect(out.jobId).toBe('job-x');
+		const warnings = out.warnings as string[];
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain('does not define it');
+		expect(warned).toHaveLength(1);
+	});
+
+	// The other half of the same pair, job da4tpje1vhnc73fle760, which completed. Warning here would
+	// tell someone their working circuit is broken.
+	it('stays silent when the Qiskit definition block is present', async () => {
+		const { out, warned } = await submit('submitSampler', {
+			qasm3: `${HEAD}gate rzz(p0) a, b {\n  cx a, b;\n  rz(p0) b;\n  cx a, b;\n}\nrzz(0.5) q[0], q[1];`,
+			shots: 100,
+		});
+		expect(out).not.toHaveProperty('warnings');
+		expect(warned).toHaveLength(0);
 	});
 
 	it('warns on the estimator path too', async () => {
