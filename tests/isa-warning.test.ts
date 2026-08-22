@@ -23,6 +23,12 @@ describe('nonIsaInstructions', () => {
 		).toEqual([]);
 	});
 
+	// sx is in the Heron basis and was verified live, so a circuit built from the palette using it
+	// must not be told to transpile.
+	it('accepts sx, which the palette now offers', () => {
+		expect(nonIsaInstructions(`${HEAD}sx q[0];\nsx q[0];`)).toEqual([]);
+	});
+
 	it('ignores structural instructions and the declarations', () => {
 		expect(
 			nonIsaInstructions(`${HEAD}barrier q[0], q[1];\nreset q[0];\ndelay[100ns] q[0];`),

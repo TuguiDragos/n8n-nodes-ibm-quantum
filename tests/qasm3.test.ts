@@ -149,6 +149,38 @@ describe('buildQasm3', () => {
 		);
 	});
 
+	// sx is the only single-qubit gate in the Heron basis besides x, so an ISA circuit written by
+	// hand needs it. Verified on ibm_fez: `sx sx` reads 249 of 256 shots as 1, which is X, and a
+	// single sx reads a 47/53 split, which is the superposition. stdgates.inc defines it, so the
+	// emitted line is the bare form Qiskit itself writes for a transpiled circuit.
+	it('renders sx as the bare stdgates form, with no definition block', () => {
+		const gates: GateOperation[] = [
+			{ gate: 'sx', targets: [0], controls: [], params: [] },
+			{ gate: 'sx', targets: [0], controls: [], params: [] },
+			{ gate: 'measure', targets: [0], controls: [], params: [], clbit: 0 },
+		];
+		const qasm = buildQasm3({ numQubits: 1, numClbits: 1, gates });
+		expect(qasm.split('\n')).toEqual([
+			'OPENQASM 3.0;',
+			'include "stdgates.inc";',
+			'qubit[1] q;',
+			'bit[1] c;',
+			'sx q[0];',
+			'sx q[0];',
+			'c[0] = measure q[0];',
+		]);
+		// No `gate sx` block, and nothing routed through the builtin U, which hardware rejects.
+		expect(qasm).not.toContain('gate sx');
+		expect(qasm).not.toContain('U(');
+	});
+
+	it('holds sx to one qubit and no angle', () => {
+		expect(validateGateInput('sx', [0], [], undefined, 2, 2)).toBeNull();
+		expect(validateGateInput('sx', [0, 1], [], undefined, 2, 2)).toMatch(/expects 1 qubit/);
+		expect(validateGateInput('sx', [0], [0.5], undefined, 2, 2)).toMatch(/expects 0 parameter/);
+		expect(validateGateInput('sx', [5], [], undefined, 2, 2)).toMatch(/qubit index 5/);
+	});
+
 	it('omits the classical register when there are no classical bits', () => {
 		const qasm = buildQasm3({ numQubits: 1, numClbits: 0, gates: [] });
 		expect(qasm).not.toMatch(/^bit\[/m);

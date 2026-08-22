@@ -13,7 +13,7 @@ export interface CircuitDefinition {
 }
 
 // 'id' is deliberately absent: it is handled separately, see the 'id' case in renderGate.
-const SINGLE_QUBIT = new Set(['x', 'y', 'z', 'h', 's', 'sdg', 't', 'tdg']);
+const SINGLE_QUBIT = new Set(['x', 'y', 'z', 'h', 's', 'sdg', 'sx', 't', 'tdg']);
 const SINGLE_QUBIT_PARAM = new Set(['rx', 'ry', 'rz', 'p']);
 const CONTROLLED_PARAM = new Set(['crx', 'cry', 'crz']);
 
@@ -26,6 +26,7 @@ export const QUBIT_ARITY: Record<string, number> = {
 	h: 1,
 	s: 1,
 	sdg: 1,
+	sx: 1,
 	t: 1,
 	tdg: 1,
 	reset: 1,

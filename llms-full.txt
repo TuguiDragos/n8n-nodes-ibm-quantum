@@ -323,6 +323,7 @@ Emitted program header: `OPENQASM 3.0;` then `include "stdgates.inc";` then `qub
 | :-- | :-- | :-- | :-- | :-- |
 | `id` | 1 | 0 | NOTHING (validated, then dropped) | would fail every job: stdgates defines `id` through the builtin `U`, which hardware rejects; the no-op is omitted instead |
 | `x` | 1 | 0 | `x q[i];` | runs as-is |
+| `sx` | 1 | 0 | `sx q[i];` | runs as-is |
 | `y`, `z` | 1 | 0 | `y q[i];` etc. | transpile first |
 | `h` | 1 | 0 | `h q[i];` | transpile first |
 | `s`, `sdg`, `t`, `tdg` | 1 | 0 | `s q[i];` etc. | transpile first |
@@ -338,9 +339,12 @@ Emitted program header: `OPENQASM 3.0;` then `include "stdgates.inc";` then `qub
 | `reset` | 1 | 0 | `reset q[i];` | runs as-is |
 | `barrier` | any (empty means all) | 0 | `barrier q[i], q[j];` or `barrier q;` | directive, always fine |
 
-Angles are radians. `sx` and `rzz` are deliberately NOT in the palette even though Heron backends
-list them as basis gates: IBM's OpenQASM 3 parser rejects `rzz` outright, and `sx` has no OpenQASM 3
-spelling that avoids the builtin `U`. Use `rx` instead of `sx`.
+Angles are radians. `rzz` is the one Heron basis gate deliberately NOT in the palette: IBM's
+OpenQASM 3 parser rejects it outright with reason code 1506, verified on ibm_kingston and ibm_fez.
+`sx` IS in the palette as of 0.5.0. It was left out on the belief that it had no OpenQASM 3 spelling
+avoiding the builtin `U`, which is wrong: `stdgates.inc` defines it, Qiskit's own exporter writes the
+bare `sx q[i];` for a transpiled circuit, and IBM runs it. Verified on ibm_fez: two in a row read 249
+of 256 shots as 1, which is X, and one alone reads a 47/53 split.
 
 ## Hardware reality: ISA circuits and transpilation
 
@@ -356,14 +360,15 @@ That is hardware behaviour, not a node bug. A failed job still consumes quota. T
 ISA circuit:
 
 1. Build natively in the node. Gates safe on Heron QPUs (the fleet Open-plan users see, such as
-   ibm_fez, ibm_kingston, ibm_marrakesh and ibm_torino): `x`, `rx`, `rz`, `cz`, `reset`, `barrier`,
-   `measure`. Two identities cover most needs (up to global phase):
-   `H = rz(pi/2) rx(pi/2) rz(pi/2)` and `CNOT(c to t) = H(t) cz(c,t) H(t)`, with pi/2 =
+   ibm_fez, ibm_kingston, ibm_marrakesh and ibm_torino): `x`, `sx`, `rx`, `rz`, `cz`, `reset`,
+   `barrier`, `measure`. Two identities cover most needs (up to global phase):
+   `H = rz(pi/2) sx rz(pi/2)` and `CNOT(c to t) = H(t) cz(c,t) H(t)`, with pi/2 =
    1.5707963267948966. A Bell state is 13 gate entries (see the example workflow below), verified on
-   real hardware. Caveat: a parametrised `rx` is a fractional gate, available on Heron only. On
-   Nighthawk processors (ibm_miami, ibm_berlin; Premium and Flex early access) the basis is
-   `cz, id, rz, sx, x` with no fractional `rx`, so this recipe does not run there and you must
-   transpile for Nighthawk instead. Fractional gates are also incompatible with gate twirling and
+   ibm_fez at 2048 shots: 48.7% `00` and 46.2% `11`, the rest readout error. Prefer `sx` over a
+   parametrised `rx` in that identity. Both work on Heron, but `rx(pi/2)` is a fractional gate, and
+   on Nighthawk processors (ibm_miami, ibm_berlin; Premium and Flex early access) the basis is
+   `cz, id, rz, sx, x` with no fractional `rx` at all, so the `sx` form runs on both fleets while the
+   `rx` form does not. Fractional gates are also incompatible with gate twirling and
    with ZNE and PEC error mitigation, so avoid Estimator resilience level 2 on circuits containing
    a parametrised `rx`.
 2. Transpile locally with Qiskit (free, any plan, no live credentials needed):
@@ -490,14 +495,14 @@ the user's own. On import, n8n rewires everything from this JSON.
       "parameters": { "resource": "circuit", "operation": "build", "numQubits": 2, "numClbits": 2,
         "gates": { "gate": [
           { "gate": "rz", "qubits": "0", "params": "1.5707963267948966" },
-          { "gate": "rx", "qubits": "0", "params": "1.5707963267948966" },
+          { "gate": "sx", "qubits": "0" },
           { "gate": "rz", "qubits": "0", "params": "1.5707963267948966" },
           { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
-          { "gate": "rx", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "sx", "qubits": "1" },
           { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
           { "gate": "cz", "qubits": "0,1" },
           { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
-          { "gate": "rx", "qubits": "1", "params": "1.5707963267948966" },
+          { "gate": "sx", "qubits": "1" },
           { "gate": "rz", "qubits": "1", "params": "1.5707963267948966" },
           { "gate": "barrier", "qubits": "0,1" },
           { "gate": "measure", "qubits": "0", "clbit": 0 },

@@ -7,6 +7,29 @@ All notable changes to this package are documented in this file.
 
 ### Added
 
+- **The `sx` gate joins the palette, and the reason it was left out was wrong.** A Heron backend
+  lists `sx` among its basis gates, and the palette excluded it on the belief that it had no
+  OpenQASM 3 spelling avoiding the builtin `U`. It does: `stdgates.inc` defines it, and Qiskit's own
+  exporter writes the bare `sx q[i];` for a transpiled circuit, with no definition block. Verified on
+  `ibm_fez`: two in a row read 249 of 256 shots as 1, which is `X`, and one alone reads a 47/53
+  split, which is the superposition. This matters more than one gate normally would, because `sx` is
+  the only single-qubit basis gate besides `x`, so without it a hand-written ISA circuit had to spell
+  its Hadamard with a parametrised `rx`. That works on Heron but is a *fractional* gate, which
+  Nighthawk processors do not offer at all and which is incompatible with gate twirling and with the
+  ZNE and PEC mitigation behind Estimator resilience level 2. `rzz` stays out: IBM's OpenQASM parser
+  rejects it outright with reason code 1506, confirmed again on `ibm_fez`.
+
+- **Every gate in the palette says whether IBM runs it untouched.** Qiskit Runtime does not
+  transpile, so a circuit built from the wrong gates is accepted, queued, and failed minutes later.
+  Sixteen of the twenty-five entries are in that category, which is most of the palette, and nothing
+  in the dropdown said so. Each option now carries a description: "Runs as-is" for the seven basis
+  gates plus measure and reset, "Transpile first" with the reason for the rest, and the two special
+  cases, `barrier` being a directive and `id` being accepted while emitting nothing. A test holds
+  those descriptions against the node's own ISA scanner, so a gate added later with the wrong blurb,
+  or a basis that changes, fails the build rather than shipping a tooltip that lies. Verified by
+  mutation: claiming Hadamard runs as-is, adding a gate with no description, and blanking one all
+  fail it.
+
 - **Several circuits in one job.** The circuit field now accepts a list as well as a string: an
   expression resolving to an array submits every circuit in a single job, one PUB each, sharing the
   same shots, bindings, observables and precision. This matters because a job carries about two QPU
@@ -68,6 +91,14 @@ All notable changes to this package are documented in this file.
   backend name when their token expired would send them after the wrong thing.
 
 ### Changed
+
+- **The README's ISA recipe is built on `sx` instead of a parametrised `rx`.** Both give a valid
+  Hadamard on Heron, and the old recipe was verified there, but the `rx` form is fractional: it does
+  not exist on Nighthawk, and it rules out gate twirling and Estimator resilience level 2. The `sx`
+  form runs on both fleets and keeps every mitigation option open. The table is rewritten row by row
+  so it can be copied straight into the Gates field, and the measured outcome is from a run of the
+  exact circuit in it: 2048 shots on `ibm_fez`, 48.7% `00` and 46.2% `11`, the remaining 5.0%
+  readout error. `llms-full.txt` and its example workflow carry the same recipe.
 
 - **Lint refuses warnings, not just errors.** Seven of the rules in the official community-nodes
   ruleset ship as `warn` rather than `error`, among them `no-dead-files`,
@@ -353,7 +384,7 @@ All notable changes to this package are documented in this file.
 
 ### Testing
 
-The suite goes from 276 to 641 tests, still at 100% statement, branch, function and line coverage.
+The suite goes from 276 to 647 tests, still at 100% statement, branch, function and line coverage.
 The new files cover ground that was unreachable before: `tests/input-guards.test.ts` for every
 parameter an expression can corrupt, `tests/node-execute.test.ts` for the node wrapper itself,
 `tests/isa-warning.test.ts` for the transpilation warning, and `tests/load-options.test.ts` for the
@@ -384,7 +415,7 @@ circuit gains one `warnings` entry while its request body stays unchanged.
 
 ### Verified on hardware
 
-Nothing in this release is claimed from reading the code. Fifty-three jobs ran on IBM Quantum across
+Nothing in this release is claimed from reading the code. Fifty-eight jobs ran on IBM Quantum across
 21 and 22 August 2026, on `ibm_fez`, `ibm_kingston` and `ibm_marrakesh`, for about 360 QPU seconds of
 the Open plan's 600 per 28 days. The node was reinstalled from a real `npm pack` tarball before each
 phase, and `diff -rq` confirmed the installed `dist` matched the repository byte for byte every time.
@@ -408,6 +439,10 @@ What ran, beyond every operation answering:
 - A decoherence curve. The same identity circuit at three depths, with `T1 = 48.12 us` read from
   `getProperties`: at 0.5 us the fidelity is 96.06%, at exactly T1 it is 50.39%, which is chance, and
   at ten times T1 it is 50.67%, because nothing is more random than random.
+- The `sx` gate, which this release adds to the palette, in both directions: two in a row read 249
+  of 256 shots as 1, which is `X`, and one alone reads a 47/53 split, which is the superposition.
+  Then a Bell state built entirely from the palette using it, 2048 shots on `ibm_fez`, reading 95.0%
+  correlated against 92.9% for the older `rx` form, because `sx` is the native gate.
 - The cost model, confirmed to three significant figures at three depths:
   `255 us of fixed overhead + gates x 24 ns` per shot, the 24 ns being the `x` gate length read from
   the backend rather than assumed.

@@ -1,30 +1,149 @@
 import type { INodeProperties } from 'n8n-workflow';
 
+// Every gate carries whether IBM runs it untouched. Qiskit Runtime does not transpile, so a
+// circuit built only from the 'runs as-is' gates needs no toolchain, and anything else is
+// accepted, queued and then failed minutes later. Saying so in the dropdown is cheaper than
+// letting someone find out from a job. The basis was read live from all three devices:
+// cz, id, rx, rz, rzz, sx, x, plus measure, reset, delay and barrier as instructions.
 const GATE_OPTIONS = [
-	{ name: 'Barrier', value: 'barrier' },
-	{ name: 'CCX / Toffoli', value: 'ccx' },
-	{ name: 'CNOT / CX', value: 'cx' },
-	{ name: 'Controlled RX', value: 'crx' },
-	{ name: 'Controlled RY', value: 'cry' },
-	{ name: 'Controlled RZ', value: 'crz' },
-	{ name: 'CZ', value: 'cz' },
-	{ name: 'Hadamard', value: 'h' },
-	{ name: 'Identity', value: 'id' },
-	{ name: 'Measure', value: 'measure' },
-	{ name: 'Phase', value: 'p' },
-	{ name: 'Reset', value: 'reset' },
-	{ name: 'RX', value: 'rx' },
-	{ name: 'RY', value: 'ry' },
-	{ name: 'RZ', value: 'rz' },
-	{ name: 'S', value: 's' },
-	{ name: 'S Dagger', value: 'sdg' },
-	{ name: 'Swap', value: 'swap' },
-	{ name: 'T', value: 't' },
-	{ name: 'T Dagger', value: 'tdg' },
-	{ name: 'U', value: 'u' },
-	{ name: 'X', value: 'x' },
-	{ name: 'Y', value: 'y' },
-	{ name: 'Z', value: 'z' },
+	{
+		name: 'Barrier',
+		value: 'barrier',
+		description: 'Directive, always accepted; leave Qubits empty to span the whole register',
+	},
+	{
+		name: 'CCX / Toffoli',
+		value: 'ccx',
+		description: 'Transpile first: the chip does not implement this two-qubit gate directly',
+	},
+	{
+		name: 'CNOT / CX',
+		value: 'cx',
+		description: 'Transpile first: the chip does not implement this two-qubit gate directly',
+	},
+	{
+		name: 'Controlled RX',
+		value: 'crx',
+		description: 'Transpile first: the chip does not implement this two-qubit gate directly',
+	},
+	{
+		name: 'Controlled RY',
+		value: 'cry',
+		description: 'Transpile first: the chip does not implement this two-qubit gate directly',
+	},
+	{
+		name: 'Controlled RZ',
+		value: 'crz',
+		description: 'Transpile first: the chip does not implement this two-qubit gate directly',
+	},
+	{
+		name: 'CZ',
+		value: 'cz',
+		description: 'Runs as-is: in the IBM basis, so no transpiler pass is needed',
+	},
+	{
+		name: 'Hadamard',
+		value: 'h',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'Identity',
+		value: 'id',
+		description: 'Accepted but emits nothing, because stdgates defines it through the builtin U',
+	},
+	{
+		name: 'Measure',
+		value: 'measure',
+		description: 'Runs as-is: in the IBM basis, so no transpiler pass is needed',
+	},
+	{
+		name: 'Phase',
+		value: 'p',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'Reset',
+		value: 'reset',
+		description: 'Runs as-is: in the IBM basis, so no transpiler pass is needed',
+	},
+	{
+		name: 'RX',
+		value: 'rx',
+		description:
+			'Runs as-is on Heron, but it is a fractional gate: no Nighthawk, no gate twirling, no resilience level 2',
+	},
+	{
+		name: 'RY',
+		value: 'ry',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'RZ',
+		value: 'rz',
+		description: 'Runs as-is: in the IBM basis, so no transpiler pass is needed',
+	},
+	{
+		name: 'S',
+		value: 's',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'S Dagger',
+		value: 'sdg',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'Swap',
+		value: 'swap',
+		description: 'Transpile first: the chip does not implement this two-qubit gate directly',
+	},
+	// Added in 0.5.0 after being verified on ibm_fez: two in a row read 249 of 256 shots as 1,
+	// which is X, and one alone reads a 47/53 split. stdgates.inc defines it, so the emitted
+	// line is the bare form Qiskit writes for a transpiled circuit.
+	{
+		name: 'SX',
+		value: 'sx',
+		description: 'Runs as-is: in the IBM basis, so no transpiler pass is needed',
+	},
+	{
+		name: 'T',
+		value: 't',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'T Dagger',
+		value: 'tdg',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'U',
+		value: 'u',
+		description: 'Transpile first: emitted as the uppercase builtin U, which hardware rejects',
+	},
+	{
+		name: 'X',
+		value: 'x',
+		description: 'Runs as-is: in the IBM basis, so no transpiler pass is needed',
+	},
+	{
+		name: 'Y',
+		value: 'y',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
+	{
+		name: 'Z',
+		value: 'z',
+		description:
+			'Transpile first: stdgates defines it through the builtin U, which hardware rejects',
+	},
 ];
 
 // Sampler and Estimator share the PUB shape and the V2 error-suppression toggles.

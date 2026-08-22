@@ -8,6 +8,7 @@ import { IbmQuantumApi } from '../credentials/IbmQuantumApi.credentials';
 import llmsFull from '../llms-full.txt?raw';
 import llmsIndex from '../llms.txt?raw';
 import { nodeProperties } from '../nodes/IbmQuantum/descriptions';
+import { nonIsaInstructions } from '../nodes/IbmQuantum/operations';
 import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
 import codexAction from '../nodes/IbmQuantum/IbmQuantum.node.json';
 import { IbmQuantumErrorTrigger } from '../nodes/IbmQuantum/IbmQuantumErrorTrigger.node';
@@ -341,5 +342,78 @@ describe('the consolidated trigger', () => {
 
 	it('keeps the retired trigger findable through the main trigger aliases', () => {
 		expect(codexTrigger.alias).toEqual(expect.arrayContaining(['Error', 'Failed', 'Canceled']));
+	});
+});
+
+// Every problem this release fixed except one was a text that no longer matched behaviour, and
+// neither the suite nor lint could see any of them. This is the one place where a description is
+// checked against what the code actually does: each gate says whether IBM runs it untouched, and
+// the node's own ISA scanner is the authority. If the basis set ever changes, or a gate is added
+// with the wrong blurb, this fails instead of shipping a tooltip that lies.
+describe('gate descriptions match the ISA scanner', () => {
+	const HEAD = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[3] q;\nbit[3] c;\n';
+	// One minimal statement per gate, in the form the builder emits.
+	const EMITTED: Record<string, string> = {
+		barrier: 'barrier q[0], q[1];',
+		ccx: 'ccx q[0], q[1], q[2];',
+		cx: 'cx q[0], q[1];',
+		crx: 'crx(0.5) q[0], q[1];',
+		cry: 'cry(0.5) q[0], q[1];',
+		crz: 'crz(0.5) q[0], q[1];',
+		cz: 'cz q[0], q[1];',
+		h: 'h q[0];',
+		id: 'id q[0];',
+		measure: 'c[0] = measure q[0];',
+		p: 'p(0.5) q[0];',
+		reset: 'reset q[0];',
+		rx: 'rx(0.5) q[0];',
+		ry: 'ry(0.5) q[0];',
+		rz: 'rz(0.5) q[0];',
+		s: 's q[0];',
+		sdg: 'sdg q[0];',
+		swap: 'swap q[0], q[1];',
+		sx: 'sx q[0];',
+		t: 't q[0];',
+		tdg: 'tdg q[0];',
+		u: 'U(0, 0, 0) q[0];',
+		x: 'x q[0];',
+		y: 'y q[0];',
+		z: 'z q[0];',
+	};
+
+	const gateOptions = () => {
+		const gates = nodeProperties.find((p) => p.name === 'gates');
+		const group = (gates?.options ?? [])[0] as { values: Array<Record<string, unknown>> };
+		const gate = group.values.find((v) => v.name === 'gate') as {
+			options: Array<{ name: string; value: string; description: string }>;
+		};
+		return gate.options;
+	};
+
+	it('has an example statement for every gate in the palette', () => {
+		const values = gateOptions().map((o) => o.value);
+		expect(values.sort()).toEqual(Object.keys(EMITTED).sort());
+	});
+
+	it('says "runs as-is" for exactly the gates the scanner accepts', () => {
+		for (const option of gateOptions()) {
+			const claimsClean =
+				option.description.startsWith('Runs as-is') ||
+				option.description.startsWith('Directive') ||
+				option.description.startsWith('Accepted but emits nothing');
+			const scannerClean = nonIsaInstructions(`${HEAD}${EMITTED[option.value]}`).length === 0;
+			expect(
+				claimsClean,
+				`${option.value}: description says ${claimsClean ? 'clean' : 'transpile'}, scanner says ${
+					scannerClean ? 'clean' : 'transpile'
+				}`,
+			).toBe(scannerClean);
+		}
+	});
+
+	it('gives every gate a description', () => {
+		for (const option of gateOptions()) {
+			expect(option.description, option.value).toBeTruthy();
+		}
 	});
 });

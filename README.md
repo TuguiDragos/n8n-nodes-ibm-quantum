@@ -186,7 +186,7 @@ metrics and flatten the answer. Every gate is native, so nothing had to be trans
 <p align="center"><sub>Build, pick a QPU, submit, wait, read the metrics, summarize. Each node hands one item to the next; the backend and the circuit are expressions, not typed in.</sub></p>
 
 The circuit is built by the node itself. A Bell state needs a Hadamard, which no IBM device runs
-natively, so it is written as `rz(pi/2) rx(pi/2) rz(pi/2)` and the CNOT becomes `cz` between two of
+natively, so it is written as `rz(pi/2) sx rz(pi/2)` and the CNOT becomes `cz` between two of
 those. Twelve gates, all inside the device's basis set.
 
 <p align="center">
@@ -276,6 +276,7 @@ The Circuit Build operation takes a gate list and emits an OpenQASM 3 string. Ea
 | :-- | :-- | :-- | :-- | :-- |
 | `id` | 1 | 0 | Identity | accepted, emitted as nothing, see below |
 | `x` | 1 | 0 | Pauli X | runs as-is |
+| `sx` | 1 | 0 | Square root of X | runs as-is |
 | `y` `z` | 1 | 0 | Pauli Y, Z | transpile first |
 | `h` | 1 | 0 | Hadamard | transpile first |
 | `s` `sdg` | 1 | 0 | Phase &pi;/2 and its inverse | transpile first |
@@ -293,7 +294,7 @@ The Circuit Build operation takes a gate list and emits an OpenQASM 3 string. Ea
 | `reset` | 1 | 0 | Reset to \|0&rang; | runs as-is |
 | `barrier` | any | 0 | Optimization barrier; omit qubits for the whole register | directive, always fine |
 
-**Runs as-is** means the instruction is in the backend's own `basis_gates` and reaches the target unchanged, so a circuit made only of those needs no transpiler. On a Heron processor that set is `x`, `rx`, `rz`, `cz`, plus measure, reset and barrier, which is enough to build real circuits: see [Building an ISA circuit directly in the node](#building-an-isa-circuit-directly-in-the-node). Everything marked **transpile first** is defined by the OpenQASM 3 standard library in terms of the builtin `U`, or is a two-qubit gate the chip does not implement, and IBM rejects it with `the instruction ... is not supported`. Check any given backend with Backend &rsaquo; Get Configuration, which returns its `basis_gates` directly.
+**Runs as-is** means the instruction is in the backend's own `basis_gates` and reaches the target unchanged, so a circuit made only of those needs no transpiler. On a Heron processor that set is `x`, `sx`, `rx`, `rz`, `cz`, plus measure, reset and barrier, which is enough to build real circuits: see [Building an ISA circuit directly in the node](#building-an-isa-circuit-directly-in-the-node). Everything marked **transpile first** is defined by the OpenQASM 3 standard library in terms of the builtin `U`, or is a two-qubit gate the chip does not implement, and IBM rejects it with `the instruction ... is not supported`. Check any given backend with Backend &rsaquo; Get Configuration, which returns its `basis_gates` directly.
 
 The U gate is emitted as the OpenQASM 3 builtin `U`, uppercase. A lowercase `u` is not defined in `stdgates.inc` and IBM's parser rejects it.
 
@@ -377,32 +378,39 @@ That is not a node bug. The node builds, submits and reads the job correctly; th
 
 ### Building an ISA circuit directly in the node
 
-Transpiling is the general answer, but for small circuits you can skip it entirely: build straight from the native gate set with the Circuit Build operation. The palette covers a Heron processor's basis apart from `sx` and `rzz`, which is enough for the Bell state below and needs no external tooling at all.
+Transpiling is the general answer, but for small circuits you can skip it entirely: build straight from the native gate set with the Circuit Build operation. The palette covers a Heron processor's basis apart from `rzz`, which is enough for the Bell state below and needs no external tooling at all.
 
 2 identities do most of the work:
 
 ```
-H            = rz(pi/2) . rx(pi/2) . rz(pi/2)      (up to a global phase)
+H            = rz(pi/2) . sx . rz(pi/2)            (up to a global phase)
 CNOT(c -> t) = H(t) . cz(c, t) . H(t)
 ```
 
-A Bell state built that way, with 13 gate entries and no Qiskit anywhere, runs as-is:
+A Bell state built that way, with 12 gate entries and no Qiskit anywhere, runs as-is. Copy this table row by row into the Gates field:
 
 | gate | qubits | parameters |
 | :-- | :-- | :-- |
-| RZ, RX, RZ | `0` | `1.5707963267948966` each |
-| RZ, RX, RZ | `1` | `1.5707963267948966` each |
+| RZ | `0` | `1.5707963267948966` |
+| SX | `0` | |
+| RZ | `0` | `1.5707963267948966` |
+| RZ | `1` | `1.5707963267948966` |
+| SX | `1` | |
+| RZ | `1` | `1.5707963267948966` |
 | CZ | `0,1` | |
-| RZ, RX, RZ | `1` | `1.5707963267948966` each |
-| Barrier | `0,1` | |
+| RZ | `1` | `1.5707963267948966` |
+| SX | `1` | |
+| RZ | `1` | `1.5707963267948966` |
 | Measure | `0` | Classical Bit `0` |
 | Measure | `1` | Classical Bit `1` |
 
-On `ibm_marrakesh` over 2048 shots that gives 51.1% `00` and 46.2% `11`, with 2.7% leaking into `01` and `10` from readout noise: the correlation an entangled pair should show.
+Set **Number of Qubits** and **Number of Classical Bits** to `2`. The circuit the node emits is exactly what Qiskit writes for a transpiled Bell state, and every gate in it is marked **runs as-is** in the palette.
 
-This holds on Heron processors, which is the fleet an Open plan sees (`ibm_fez`, `ibm_kingston`, `ibm_marrakesh`, `ibm_torino`). It does not hold everywhere: a parametrized `rx` is a *fractional* gate, and IBM's newer **Nighthawk** processors (`ibm_miami`, `ibm_berlin`, on Premium and Flex) run `cz`, `id`, `rz`, `sx`, `x` with no fractional `rx`, so the recipe above will not run there and the circuit has to be transpiled for that device. Fractional gates are also incompatible with Gate Twirling and with the ZNE and PEC mitigation behind Estimator resilience level 2.
+Measured on `ibm_fez` over 2048 shots: 48.7% `00` and 46.2% `11`, with 5.0% leaking into `01` and `10` from readout error. That is the correlation an entangled pair should show.
 
-Gates that are safe to use this way: **X, RX, RZ, CZ, Reset, Barrier, Measure**. A Heron backend also lists `sx` and `rzz` among its basis gates, but neither is offered here: `sx` has no OpenQASM 3 spelling the palette can emit without going through the builtin `U`, and `rzz` is rejected by IBM's OpenQASM parser outright, verified against `ibm_kingston`. `rx` covers what `sx` would give you. Everything else in the palette (`h`, `cx`, `u`, `swap`, `ccx`, the daggered gates) is defined by the OpenQASM 3 standard library in terms of the builtin `U`, which hardware rejects, so those need a transpiler pass first. Identity is a special case: it is accepted but emits nothing, because `stdgates.inc` defines it as `U(0, 0, 0)` and it would otherwise fail every job it appears in.
+This recipe is deliberately built on `sx` rather than a parametrized `rx`. Both give a valid Hadamard on Heron, but `rx(pi/2)` is a *fractional* gate, and fractional gates are incompatible with Gate Twirling and with the ZNE and PEC mitigation behind Estimator resilience level 2. IBM's newer **Nighthawk** processors (`ibm_miami`, `ibm_berlin`, on Premium and Flex) run `cz`, `id`, `rz`, `sx`, `x` with no fractional `rx` at all. The `sx` form above therefore runs unchanged on both fleets and stays compatible with every mitigation option.
+
+Gates that are safe to use this way: **X, SX, RX, RZ, CZ, Reset, Barrier, Measure**. `sx` was added to the palette after being verified on `ibm_fez`: `stdgates.inc` defines it, so the node emits the bare `sx q[n];` that Qiskit itself writes for a transpiled circuit, and IBM runs it. Two of them in a row read 249 of 256 shots as 1, which is `X`, and a single one reads a 47/53 split, which is the superposition. `rzz` is the one basis gate still left out: IBM's OpenQASM parser rejects it outright with reason code 1506, verified on both `ibm_kingston` and `ibm_fez`. Everything else in the palette (`h`, `cx`, `u`, `swap`, `ccx`, the daggered gates) is defined by the OpenQASM 3 standard library in terms of the builtin `U`, which hardware rejects, so those need a transpiler pass first. Identity is a special case: it is accepted but emits nothing, because `stdgates.inc` defines it as `U(0, 0, 0)` and it would otherwise fail every job it appears in.
 
 ### How to transpile, free, on any plan
 
