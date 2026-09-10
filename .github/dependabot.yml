@@ -3,7 +3,12 @@ updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      # Monthly, on the first of the month, the day scan.yml runs the verification scanner too.
+      # n8n ships a minor every Tuesday and patches on most other days, so one grouped PR a month
+      # collects them. The schedule governs version updates only: a security update still opens
+      # as soon as Dependabot raises an alert. The n8n-workflow pin does not wait for this either,
+      # since AGENTS.md has it checked by hand every week.
+      interval: monthly
     open-pull-requests-limit: 5
     # Batch minor and patch bumps into a single PR to cut review noise.
     groups:
@@ -41,7 +46,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     # One grouped PR for all GitHub Actions bumps instead of one per action.
     groups:
       github-actions:
