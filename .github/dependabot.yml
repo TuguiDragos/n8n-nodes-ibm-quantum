@@ -14,7 +14,7 @@ updates:
           - minor
           - patch
     # Toolchain bumps that need manual compatibility work. Each entry below says which bumps it
-    # blocks and why; eslint is the one blocked at every level, not just at a major.
+    # blocks and why; eslint and @eslint/js are the two blocked at every level, not just at a major.
     ignore:
       # TypeScript 7 removes moduleResolution=node10 (which tsconfig.json uses) and the current
       # typescript-eslint cannot load against it. Moving up needs a manual tsconfig migration.
@@ -24,14 +24,18 @@ updates:
       # bump (not just a major) produces a PR that cannot install. The version is pinned exactly
       # in package.json and moves only when the n8n plugin's peer moves.
       - dependency-name: eslint
+      # @eslint/js is eslint's own recommended ruleset, pinned to the same 9.29.0 so its
+      # recommended set can never name a rule this eslint lacks. It moves together with eslint.
+      - dependency-name: "@eslint/js"
       - dependency-name: vitest
         update-types: [version-update:semver-major]
       - dependency-name: "@vitest/coverage-v8"
         update-types: [version-update:semver-major]
       # The node targets the n8n v2 line; a v3 major is a deliberate, manual migration. Minor
       # bumps still need a manual check: n8n-workflow's npm dist-tags are not conventional
-      # (`latest` trails well behind `stable`, and `beta` runs ahead), so confirm the proposed
-      # version is on the `stable` tag before merging.
+      # (`latest` trails well behind `stable`, `beta` runs ahead, and `stable` itself can lag the
+      # n8n release), so confirm the proposed version is the one n8n's stable release ships,
+      # `npm view n8n dependencies.n8n-workflow`, before merging.
       - dependency-name: n8n-workflow
         update-types: [version-update:semver-major]
   - package-ecosystem: github-actions

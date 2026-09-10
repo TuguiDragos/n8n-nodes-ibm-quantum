@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { nodeProperties } from '../nodes/IbmQuantum/descriptions';
 import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
-import { fakeNode, type HttpCall } from './fakeContext';
+import { fakeNode, TEST_ACCOUNT_ID, TEST_CRN, type HttpCall } from './fakeContext';
 
 // The node dispatches on `resource` before any handler sees the operation. Two resources answer to
 // the operation name `list`, so a routing mistake would not fail: it would quietly return the wrong
@@ -20,7 +20,11 @@ function runResource(
 		getNode: () => fakeNode(),
 		continueOnFail: () => false,
 		logger: { warn: () => {} },
-		getCredentials: async () => ({ region: 'us-east', apiVersion: '2026-04-15' }),
+		getCredentials: async () => ({
+			region: 'us-east',
+			apiVersion: '2026-04-15',
+			instanceCrn: TEST_CRN,
+		}),
 		getNodeParameter: (name: string, _itemIndex?: number, fallback?: unknown) =>
 			name in all ? all[name] : fallback,
 		helpers: {
@@ -48,6 +52,13 @@ describe('resource routing', () => {
 	it.each([
 		['backend', 'list', '/backends'],
 		['account', 'getUsage', '/instances/usage'],
+		['account', 'getAccountConfiguration', `/accounts/${TEST_ACCOUNT_ID}`],
+		[
+			'account',
+			'getManyInstances',
+			'https://resource-controller.cloud.ibm.com/v2/resource_instances',
+		],
+		['account', 'setCostLimit', `/v2/resource_instances/${encodeURIComponent(TEST_CRN)}`],
 		['session', 'get', '/sessions/sess-1'],
 	])('routes %s %s to %s', async (resource, operation, expected) => {
 		const requests = await runResource(resource, operation, { sessionId: 'sess-1' });

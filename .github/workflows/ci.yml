@@ -15,6 +15,9 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # Node 24 is what n8n runs on: n8n 2.36 and later declare engines.node >=24. Node 22 stays
+    # in the matrix because engines.node here is still >=22 and n8n 2.35 and older run on it.
+    # Drop it from the matrix only when engines moves.
     strategy:
       fail-fast: false
       matrix:
@@ -29,6 +32,14 @@ jobs:
       # or test, so skip install scripts to keep the matrix green on every Node version.
       - run: npm ci --ignore-scripts
       - run: npm run lint
+      # The lint the n8n verification process runs, through the official CLI: `eslint .` with
+      # this repository's own eslint.config.mjs, without --max-warnings, so it exits 0 on the
+      # warnings the step above fails on. What it adds is the process check and the one file that
+      # step never reads, .prettierrc.js, where a parse error or a directive naming an unknown rule
+      # is still an eslint error. --no stops npx from installing a registry package named n8n-node
+      # (a placeholder exists) if the devDependency ever went missing; in CI npx assumes --yes and
+      # would fetch it silently instead of failing.
+      - run: npx --no -- n8n-node lint
       # Prettier is the documented formatting rule, but ESLint does not enforce it, so without
       # this step an unformatted pull request would still pass CI.
       - run: npm run format:check

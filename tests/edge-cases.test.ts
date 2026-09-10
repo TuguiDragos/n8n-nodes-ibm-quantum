@@ -16,7 +16,7 @@ import { buildQasm3, type GateOperation } from '../nodes/IbmQuantum/qasm3';
 import { parseResults } from '../nodes/IbmQuantum/results';
 import { enrichApiError } from '../nodes/IbmQuantum/transport';
 import { pollJobs } from '../nodes/IbmQuantum/triggerPoll';
-import { fakeNode, makeExecuteContext, TEST_CTX } from './fakeContext';
+import { fakeNode, jobPost, makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 // Defensive fallbacks that only fire on a partial or malformed API response. They are the paths
 // that run on the worst day, so they are worth pinning down rather than leaving to inference.
@@ -117,9 +117,9 @@ describe('isTransientPollError', () => {
 	// A non-numeric httpCode (n8n sometimes stores a code string there) must not be read as a
 	// status, or Number() yields NaN and the connection-level check never runs.
 	it('falls through to the cause code when httpCode is not numeric', () => {
-		expect(isTransientPollError({ httpCode: 'ECONNREFUSED', cause: { code: 'ECONNREFUSED' } })).toBe(
-			true,
-		);
+		expect(
+			isTransientPollError({ httpCode: 'ECONNREFUSED', cause: { code: 'ECONNREFUSED' } }),
+		).toBe(true);
 	});
 });
 
@@ -166,7 +166,12 @@ describe('pollJobs surfaces a failed listing request', () => {
 		};
 
 		await expect(
-			pollJobs(ctx as never, 50, () => true, (job) => job),
+			pollJobs(
+				ctx as never,
+				50,
+				() => true,
+				(job) => job,
+			),
 		).rejects.toThrow(/Instance not found/);
 	});
 
@@ -183,7 +188,12 @@ describe('pollJobs surfaces a failed listing request', () => {
 			},
 		};
 
-		const result = await pollJobs(ctx as never, 50, () => true, (job) => job);
+		const result = await pollJobs(
+			ctx as never,
+			50,
+			() => true,
+			(job) => job,
+		);
 		expect(result).toEqual([[{ id: 'j1' }]]);
 	});
 });
@@ -191,9 +201,12 @@ describe('pollJobs surfaces a failed listing request', () => {
 describe('IAM failure hints stay minimal and safe', () => {
 	const cred = new IbmQuantumApi();
 	const preAuth = (httpRequest: () => Promise<unknown>) =>
-		cred.preAuthentication.call({ helpers: { httpRequest } } as unknown as IHttpRequestHelper, {
-			apiKey: 'SECRET_KEY_VALUE',
-		} as unknown as ICredentialDataDecryptedObject);
+		cred.preAuthentication.call(
+			{ helpers: { httpRequest } } as unknown as IHttpRequestHelper,
+			{
+				apiKey: 'SECRET_KEY_VALUE',
+			} as unknown as ICredentialDataDecryptedObject,
+		);
 
 	it('adds no parenthetical at all for a status it has no wording for', async () => {
 		let message = '';
@@ -255,7 +268,12 @@ describe('response shapes the API can legitimately return', () => {
 		);
 		expect(fromWorkloads).toEqual([[{ id: 'w1' }]]);
 
-		const fromNeither = await pollJobs(make({}) as never, 50, () => true, (job) => job);
+		const fromNeither = await pollJobs(
+			make({}) as never,
+			50,
+			() => true,
+			(job) => job,
+		);
 		expect(fromNeither).toBeNull();
 	});
 });
@@ -285,13 +303,18 @@ describe('handler fallbacks when the API answers with less than expected', () =>
 		expect((requests[0].qs as Record<string, unknown>).pending).toBe(true);
 	});
 
-	it('passes a non-string logs body through instead of coercing it to text', async () => {
+	// The request asks for the log as text, so a log that happens to be valid JSON stays text. It
+	// used to arrive parsed, which broke every expression written against a field documented as
+	// text. A fake context cannot ask axios for text, so a parsed body still reaches the handler
+	// here and this pins what it does with one.
+	it('keeps logs as text even when the body arrives parsed', async () => {
 		const { ctx } = makeExecuteContext({
 			params: { jobId: 'j1' },
 			http: () => ({ lines: ['a', 'b'] }),
 		});
 		const result = (await handleJob.call(ctx, TEST_CTX, 'getLogs', 0)) as Record<string, unknown>;
-		expect(result).toEqual({ jobId: 'j1', logs: { lines: ['a', 'b'] } });
+		expect(typeof result.logs).toBe('string');
+		expect(result).toEqual({ jobId: 'j1', logs: '{"lines":["a","b"]}' });
 	});
 
 	it('reports a null session id when the create response carries none', async () => {
@@ -299,7 +322,10 @@ describe('handler fallbacks when the API answers with less than expected', () =>
 			params: { mode: 'batch', sessionBackend: 'ibm_kingston', maxTtl: 0 },
 			http: () => ({}),
 		});
-		const created = (await handleSession.call(ctx, TEST_CTX, 'create', 0)) as Record<string, unknown>;
+		const created = (await handleSession.call(ctx, TEST_CTX, 'create', 0)) as Record<
+			string,
+			unknown
+		>;
 		expect(created.sessionId).toBeNull();
 	});
 
@@ -310,13 +336,14 @@ describe('handler fallbacks when the API answers with less than expected', () =>
 		expect(mapped.backend).toBeNull();
 		expect(mapped.status).toBe('');
 	});
-})
+});
 
 describe('optional and absent inputs on the circuit handlers', () => {
 	it('builds an empty circuit when no gates were added at all', () => {
 		const { ctx } = makeExecuteContext({ params: { numQubits: 2, numClbits: 2, gates: {} } });
 		const result = handleCircuitBuild.call(ctx, 0);
 		expect(result.gateCount).toBe(0);
+		expect(result.instructionCount).toBe(0);
 		expect(result.qasm3).toBe('OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nbit[2] c;');
 	});
 
@@ -339,7 +366,10 @@ describe('backend selection against a sparse listing', () => {
 		const { ctx } = makeExecuteContext({
 			params: { minQubits: 0, includeSimulators: false },
 			http: () => ({
-				devices: [{ name: 'no_status', queue_length: 0 }, { name: 'ok', status: { name: 'online' }, queue_length: 3 }],
+				devices: [
+					{ name: 'no_status', queue_length: 0 },
+					{ name: 'ok', status: { name: 'online' }, queue_length: 3 },
+				],
 			}),
 		});
 		const result = await handleBackend.call(ctx, TEST_CTX, 'getLeastBusy', 0);
@@ -368,7 +398,7 @@ describe('submit handles JSON parameters that arrive already parsed', () => {
 			http: () => ({ id: 'job-1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
-		const body = requests[0].body as Record<string, Record<string, unknown>>;
+		const body = jobPost(requests as HttpCall[]).body as Record<string, Record<string, unknown>>;
 		expect(body.params.options).toEqual({ default_shots: 4096 });
 	});
 
@@ -383,7 +413,10 @@ describe('submit handles JSON parameters that arrive already parsed', () => {
 			http: () => ({ id: 'job-1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
-		expect((requests[0].body as Record<string, Record<string, unknown>>).params.options).toBeUndefined();
+		expect(
+			(jobPost(requests as HttpCall[]).body as Record<string, Record<string, unknown>>).params
+				.options,
+		).toBeUndefined();
 	});
 
 	it('reports a null job id when the submit response carries none', async () => {
@@ -391,7 +424,10 @@ describe('submit handles JSON parameters that arrive already parsed', () => {
 			params: { backend: 'ibm_kingston', qasm3: 'OPENQASM 3.0;', shots: 128 },
 			http: () => ({}),
 		});
-		const result = (await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)) as Record<string, unknown>;
+		const result = (await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)) as Record<
+			string,
+			unknown
+		>;
 		expect(result.jobId).toBeNull();
 		expect(result.sessionId).toBeNull();
 	});
@@ -401,7 +437,15 @@ describe('submit handles JSON parameters that arrive already parsed', () => {
 		const result = (await handleJob.call(ctx, TEST_CTX, 'getLogs', 0)) as Record<string, unknown>;
 		expect(result.logs).toBe('');
 	});
-})
+
+	// A log file that is nothing but a number parses to one, and a number carries no fields, so it
+	// reads as no logs. llms-full.txt documents that corner; this pins the two together.
+	it('reads a logs body that parsed to a bare number as no logs', async () => {
+		const { ctx } = makeExecuteContext({ params: { jobId: 'j1' }, http: () => 42 });
+		const result = (await handleJob.call(ctx, TEST_CTX, 'getLogs', 0)) as Record<string, unknown>;
+		expect(result.logs).toBe('');
+	});
+});
 
 describe('enrichApiError on a same-module error whose body has no solution', () => {
 	it('replaces the message and leaves the existing description alone', () => {
@@ -418,7 +462,7 @@ describe('enrichApiError on a same-module error whose body has no solution', () 
 		expect(enriched.message).toBe('Error authenticating user.');
 		expect(enriched.description).toBe('kept');
 	});
-})
+});
 
 describe('a circuit that is plainly not OpenQASM 3 is rejected before it costs a submission', () => {
 	// IBM accepts the job, queues it, charges QPU time and only then fails it with a parse error.
@@ -437,10 +481,11 @@ describe('a circuit that is plainly not OpenQASM 3 is rejected before it costs a
 	});
 
 	it('still accepts a real program, including the physical-qubit form a transpiler emits', async () => {
-		const transpiled = 'OPENQASM 3.0;\ninclude "stdgates.inc";\nbit[1] c;\nrz(pi/2) $2;\nc[0] = measure $2;';
+		const transpiled =
+			'OPENQASM 3.0;\ninclude "stdgates.inc";\nbit[1] c;\nrz(pi/2) $2;\nc[0] = measure $2;';
 		const { ctx, requests } = submit(transpiled);
 		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
-		expect(requests).toHaveLength(1);
+		expect(requests.filter((call) => call.method === 'POST')).toHaveLength(1);
 	});
 });
 
@@ -462,7 +507,7 @@ describe('clampCount keeps a count field usable whatever an expression injects',
 		expect(clampCount(5000, 50, 200)).toBe(200);
 		expect(clampCount(5000, 50)).toBe(5000);
 	});
-})
+});
 
 describe('job list filters that changed shape', () => {
 	const list = (listFilters: Record<string, unknown>) =>
@@ -488,13 +533,17 @@ describe('job list filters that changed shape', () => {
 		expect((none.requests[0].qs as Record<string, unknown>).tags).toBeUndefined();
 	});
 
-	it('passes the primitive through as the program filter', async () => {
+	it('passes the program through as the program filter, including the noise learner', async () => {
 		const { ctx, requests } = list({ program: 'estimator' });
 		await handleJob.call(ctx, TEST_CTX, 'list', 0);
 		expect((requests[0].qs as Record<string, unknown>).program).toBe('estimator');
+
+		const learner = list({ program: 'noise-learner' });
+		await handleJob.call(learner.ctx, TEST_CTX, 'list', 0);
+		expect((learner.requests[0].qs as Record<string, unknown>).program).toBe('noise-learner');
 
 		const any = list({ program: '' });
 		await handleJob.call(any.ctx, TEST_CTX, 'list', 0);
 		expect((any.requests[0].qs as Record<string, unknown>).program).toBeUndefined();
 	});
-})
+});

@@ -7,7 +7,12 @@ import { makeExecuteContext, type FakeContextOptions } from './fakeContext';
 // The shape below is a real GET /v1/backends body, trimmed to the fields the dropdown reads.
 const DEVICES = [
 	{ name: 'ibm_kingston', status: { name: 'online', reason: 'available' }, queue_length: 0 },
-	{ name: 'ibm_fez', status: { name: 'online', reason: 'available' }, queue_length: 7 },
+	{
+		name: 'ibm_fez',
+		status: { name: 'online', reason: 'available' },
+		queue_length: 7,
+		processor_type: { family: 'Heron', revision: '2' },
+	},
 	{ name: 'ibm_marrakesh', status: { name: 'paused', reason: 'Maintenance' }, queue_length: 20 },
 ];
 
@@ -32,6 +37,25 @@ describe('backendLabel', () => {
 		expect(backendLabel({ name: 'a', status: 'online', queue_length: '4' })).toBe('a');
 		expect(backendLabel({})).toBe('');
 	});
+
+	// processor_type is in the default listing (no fields parameter needed), so the family costs
+	// the dropdown nothing. Revision alone is meaningless and is dropped without the family.
+	it('puts the processor family and revision before the status', () => {
+		expect(
+			backendLabel({
+				name: 'a',
+				processor_type: { family: 'Nighthawk', revision: '1' },
+				status: { name: 'online' },
+				queue_length: 0,
+			}),
+		).toBe('a (Nighthawk r1, online, 0 queued)');
+		expect(backendLabel({ name: 'a', processor_type: { family: 'Heron' } })).toBe('a (Heron)');
+		expect(backendLabel({ name: 'a', processor_type: { revision: '2' } })).toBe('a');
+		expect(backendLabel({ name: 'a', processor_type: 'Heron', queue_length: 3 })).toBe(
+			'a (3 queued)',
+		);
+		expect(backendLabel({ name: 'a', processor_type: null })).toBe('a');
+	});
 });
 
 describe('getBackends', () => {
@@ -49,7 +73,7 @@ describe('getBackends', () => {
 	it('stores the bare name and sorts by it', async () => {
 		const { ctx } = loadContext({ http: () => ({ devices: DEVICES }) });
 		expect(await getBackends.call(ctx)).toEqual([
-			{ name: 'ibm_fez (online, 7 queued)', value: 'ibm_fez' },
+			{ name: 'ibm_fez (Heron r2, online, 7 queued)', value: 'ibm_fez' },
 			{ name: 'ibm_kingston (online, 0 queued)', value: 'ibm_kingston' },
 			{ name: 'ibm_marrakesh (paused, 20 queued)', value: 'ibm_marrakesh' },
 		]);
@@ -67,7 +91,7 @@ describe('getBackends', () => {
 			http: () => ({ devices: [null, 'text', { status: {} }, { name: '' }, DEVICES[1]] }),
 		});
 		expect(await getBackends.call(ctx)).toEqual([
-			{ name: 'ibm_fez (online, 7 queued)', value: 'ibm_fez' },
+			{ name: 'ibm_fez (Heron r2, online, 7 queued)', value: 'ibm_fez' },
 		]);
 	});
 
@@ -87,7 +111,7 @@ describe('getBackends', () => {
 			http: () => ({ devices: [DEVICES[1]] }),
 		});
 		expect(await getBackends.call(ctx)).toEqual([
-			{ name: 'ibm_fez (online, 7 queued)', value: 'ibm_fez' },
+			{ name: 'ibm_fez (Heron r2, online, 7 queued)', value: 'ibm_fez' },
 		]);
 	});
 

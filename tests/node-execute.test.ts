@@ -1,3 +1,4 @@
+import { NodeApiError } from 'n8n-workflow';
 import { describe, expect, it } from 'vitest';
 
 import { IbmQuantum } from '../nodes/IbmQuantum/IbmQuantum.node';
@@ -37,9 +38,10 @@ function run(opts: RunOptions) {
 			},
 		},
 	};
-	return new IbmQuantum().execute
-		.call(ctx as never)
-		.then((out) => ({ out: out as Array<Array<{ json: unknown; pairedItem?: unknown }>>, requests }));
+	return new IbmQuantum().execute.call(ctx as never).then((out) => ({
+		out: out as Array<Array<{ json: unknown; pairedItem?: unknown }>>,
+		requests,
+	}));
 }
 
 describe('the node processes every input item, not just the first', () => {
@@ -136,12 +138,41 @@ describe('continue on fail isolates a failing item', () => {
 			/Unsupported circuit operation: transpile/,
 		);
 	});
+
+	// An error from IBM is the failure users meet most, and it is the one that reached them with no
+	// item on it: the request helpers wrap it before the node's own catch sees it.
+	it('points a failed request at the item that made it', async () => {
+		const refused = Object.assign(new Error('Request failed with status code 404'), {
+			name: 'AxiosError',
+			response: {
+				status: 404,
+				data: { errors: [{ code: '1279', message: 'Instance not found' }] },
+			},
+		});
+		const thrown = await run({
+			items: 3,
+			shared: { resource: 'job', operation: 'getStatus' },
+			perItem: [{ jobId: 'a' }, { jobId: 'b' }, { jobId: 'c' }],
+			respond: (_call, index) => {
+				if (index === 1) throw refused;
+				return {};
+			},
+		}).catch((error: unknown) => error);
+		expect(thrown).toBeInstanceOf(NodeApiError);
+		expect((thrown as NodeApiError).message).toBe('Instance not found');
+		expect((thrown as NodeApiError).context.itemIndex).toBe(1);
+	});
 });
 
-// Version 2 renamed the session parameter because n8n's MCP server drops any parameter called
-// `mode`. Both must keep working, and neither may read the other.
+// Version 2 renamed the session parameter after n8n's MCP server, observed live on 0.4.1, left a
+// parameter called `mode` out of the node's type definition. Both must keep working, and neither
+// may read the other.
 describe('the @version gate keeps mode and sessionMode apart', () => {
-	const sessionParams = { resource: 'session', operation: 'create', sessionBackend: 'ibm_kingston' };
+	const sessionParams = {
+		resource: 'session',
+		operation: 'create',
+		sessionBackend: 'ibm_kingston',
+	};
 
 	it('version 1 sends the value stored under mode', async () => {
 		const { requests } = await run({

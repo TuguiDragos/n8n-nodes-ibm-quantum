@@ -6,16 +6,23 @@ import {
 } from 'n8n-workflow';
 
 import { checkApiVersion, enrichApiError, getBaseUrl } from './transport';
+import { processorTypeOf } from './operations';
 
 const REQUEST_TIMEOUT_MS = 30000;
 
-// GET /backends already returns status and queue depth per device, so the label costs no extra
-// call. The value stays the bare name, which is what every operation sends and what workflows
-// saved before this dropdown existed already hold.
+// GET /backends already returns processor type, status and queue depth per device, so the label
+// costs no extra call. The value stays the bare name, which is what every operation sends and what
+// workflows saved before this dropdown existed already hold.
 export function backendLabel(device: IDataObject): string {
 	const name = String(device.name ?? '');
 	const status = (device.status as IDataObject) ?? {};
 	const parts: string[] = [];
+	const processor = processorTypeOf(device);
+	if (processor.family !== null) {
+		parts.push(
+			processor.revision === null ? processor.family : `${processor.family} r${processor.revision}`,
+		);
+	}
 	if (typeof status.name === 'string' && status.name !== '') parts.push(status.name);
 	if (typeof device.queue_length === 'number') parts.push(`${device.queue_length} queued`);
 	return parts.length > 0 ? `${name} (${parts.join(', ')})` : name;

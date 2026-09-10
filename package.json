@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-ibm-quantum",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Verified n8n community node for IBM Quantum. Build OpenQASM 3 circuits, submit to Qiskit Runtime, and trigger on job completion or failure. Usable as an AI Agent tool.",
   "keywords": [
     "n8n-community-node-package",
@@ -38,15 +38,15 @@
   "scripts": {
     "build": "tsc && node scripts/copy-assets.mjs",
     "dev": "tsc --watch",
-    "format": "prettier nodes credentials --write",
-    "format:check": "prettier nodes credentials --check",
-    "lint": "eslint package.json nodes credentials --max-warnings 0",
-    "lintfix": "eslint package.json nodes credentials --fix",
-    "scan": "npx --yes @n8n/scan-community-package@latest n8n-nodes-ibm-quantum",
+    "format": "prettier nodes credentials tests scripts --write",
+    "format:check": "prettier nodes credentials tests scripts --check",
+    "lint": "eslint package.json index.js nodes credentials tests scripts --max-warnings 0",
+    "lintfix": "eslint package.json index.js nodes credentials tests scripts --fix",
+    "scan": "npx --yes @n8n/scan-community-package@latest n8n-nodes-ibm-quantum | node scripts/scan-verdict.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build && npm run lint && npm run test"
+    "prepublishOnly": "node scripts/release-guard.mjs && npm run build && npm run lint && npx --no -- n8n-node lint && npm run format:check && npm run test:coverage"
   },
   "files": [
     "dist",
@@ -56,7 +56,6 @@
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,
-    "strict": true,
     "credentials": [
       "dist/credentials/IbmQuantumApi.credentials.js"
     ],
@@ -73,12 +72,14 @@
     "n8n-workflow": "*"
   },
   "devDependencies": {
+    "@eslint/js": "9.29.0",
     "@n8n/eslint-plugin-community-nodes": "^0.32.0",
     "@n8n/node-cli": "^0.47.2",
     "@types/node": "^26.5.1",
     "@vitest/coverage-v8": "^5.0.0",
     "eslint": "9.29.0",
     "eslint-plugin-n8n-nodes-base": "^2.0.0",
+    "globals": "^17.12.0",
     "n8n-workflow": "2.38.1",
     "prettier": "^3.9.6",
     "typescript": "^5.9.0",

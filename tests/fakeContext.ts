@@ -32,6 +32,21 @@ export interface FakeContextOptions {
 
 export const TEST_CTX = { baseUrl: 'https://quantum.cloud.ibm.com/api/v1' };
 
+// The account id inside TEST_CRN, which is the path segment GET /accounts/{id} is called with.
+export const TEST_ACCOUNT_ID = '0123456789abcdef0123456789abcdef';
+
+// One instance CRN for every test that needs the credential's `instanceCrn`: account scoped, with
+// the id above as its seventh colon-separated field.
+export const TEST_CRN = `crn:v1:bluemix:public:quantum-computing:us-east:a/${TEST_ACCOUNT_ID}:0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b::`;
+
+// Every OpenQASM 3 submit reads the backend configuration before posting the job, so the POST
+// is never the first call. Find it rather than assume its position.
+export function jobPost(requests: HttpCall[]): HttpCall {
+	return requests.find(
+		(call) => call.method === 'POST' && String(call.url).endsWith('/jobs'),
+	) as HttpCall;
+}
+
 export function fakeNode(typeVersion = 1): INode {
 	return {
 		name: 'IBM Quantum',

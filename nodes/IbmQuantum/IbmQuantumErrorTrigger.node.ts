@@ -26,7 +26,7 @@ export class IbmQuantumErrorTrigger implements INodeType {
 		subtitle: '=On {{$parameter["errorFilter"]}} jobs',
 		description:
 			'Starts the workflow when an IBM Quantum job fails or is canceled, with the failure reason and code',
-		documentationUrl: 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme',
+		documentationUrl: 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#long-running-jobs',
 		defaults: { name: 'IBM Quantum Error Trigger' },
 		polling: true,
 		// usableAsTool is deliberately absent. The verification ruleset that once required it on
@@ -65,7 +65,7 @@ export class IbmQuantumErrorTrigger implements INodeType {
 				name: 'tagFilter',
 				type: 'string',
 				default: '',
-				placeholder: 'experiment-7, vqe',
+				placeholder: 'e.g. experiment-7, vqe',
 				description:
 					'Only consider jobs carrying these tags (set tags on the Submit operation). Comma-separated for several, and a job must carry all of them. Leave empty to consider all jobs.',
 			},

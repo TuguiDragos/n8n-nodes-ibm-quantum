@@ -34,6 +34,17 @@ describe('checkApiVersion', () => {
 		expect(checkApiVersion('2026-13-01')).toMatchObject({ fatal: true });
 	});
 
+	it('names the field without repeating what it read', () => {
+		// The box is free text beside the API Key box, so a refusal that quoted it would write a
+		// mis-pasted key into the output item and the saved execution.
+		const mispaste = 'AbCdEf01-GhIjKl23_MnOpQr45StUvWx67YzAbCdEf89';
+		for (const value of [mispaste, 'latest', '2026-02-31', 'crn:v1:bluemix:public']) {
+			const problem = checkApiVersion(value);
+			expect(problem?.message).not.toContain(value);
+			expect(problem?.message).toContain("The credential's API Version is not a YYYY-MM-DD date");
+		}
+	});
+
 	it('warns without failing for a deprecated version that still answers', () => {
 		const problem = checkApiVersion('2025-05-01');
 		expect(problem).toMatchObject({ fatal: false });
@@ -57,7 +68,16 @@ describe('the API version guard on the polling path', () => {
 				returnJsonArray: (data: unknown[]) => data,
 			},
 		};
-		return { run: () => pollJobs(ctx as never, 50, () => true, (job) => job), requests };
+		return {
+			run: () =>
+				pollJobs(
+					ctx as never,
+					50,
+					() => true,
+					(job) => job,
+				),
+			requests,
+		};
 	};
 
 	it('refuses to poll on a malformed version, before any request goes out', async () => {

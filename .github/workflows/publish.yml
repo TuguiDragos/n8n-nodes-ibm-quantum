@@ -2,7 +2,10 @@ name: Publish to npm
 
 on:
   release:
-    types: [created]
+    # published, not created: GitHub runs nothing for created on a draft release, and publishing
+    # that draft later fires published. Subscribing to published alone covers a release made
+    # outright and one published from a draft, and fires once either way.
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -23,19 +26,52 @@ jobs:
           # runtime; the package itself supports Node 22 and 24 alike.
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
-          cache: npm
+          # No dependency cache on the job that holds the OIDC token: setup-node's own trusted
+          # publishing guidance is that a poisoned cache can expose credentials, that token
+          # among them, to the code it restores. This job installs cold on purpose, and the
+          # flag also keeps the automatic cache off if package.json ever names a package manager.
+          package-manager-cache: false
       - run: npm ci --ignore-scripts
+      # Unguarded, so a manual dispatch is held to the same rule as a release: the run must come
+      # from a tag, and that tag must be the version being published. Both triggers put the tag
+      # in GITHUB_REF_NAME, and a dispatch from a branch stops here instead of publishing
+      # whatever that branch declares.
       - name: Verify package version matches the release tag
-        if: github.event_name == 'release'
         run: |
           PKG=$(node -p "require('./package.json').version")
           TAG=${GITHUB_REF_NAME#v}
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "publishing runs from a tag; $GITHUB_REF_NAME is a $GITHUB_REF_TYPE"
+            exit 1
+          fi
           if [ "$PKG" != "$TAG" ]; then
             echo "package.json version ($PKG) does not match the release tag ($TAG)"
             exit 1
           fi
       # Authentication is npm trusted publishing over OIDC, so there is no token to store or
       # rotate. Provenance is generated automatically on this path, which is why --provenance
-      # is absent: passing it is unnecessary. prepublishOnly runs build, lint and test first.
+      # is absent: passing it is unnecessary. prepublishOnly runs the release guard and then the
+      # five gates CI runs.
       # This requires the package's trusted publisher to be configured on npmjs.com first.
-      - run: npm publish --access public
+      # --tag is explicit because npm writes latest whenever it is absent, which would hand a
+      # pre-release the tag `npm install` and the n8n registry read.
+      # Only a release fills github.event.release, so on a manual dispatch that expression is the
+      # empty string and the flag is read from the tag's own release instead, when that lookup
+      # answers. A tag with no release to read leaves the version suffix as the only test, so a
+      # pre-release published from a bare tag needs a version like 0.7.0-rc.1 to stay off latest.
+      - name: Publish to npm
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          if [ -z "$PRERELEASE" ]; then
+            PRERELEASE=$(gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+              --json isPrerelease -q .isPrerelease || true)
+          fi
+          if [ "$PRERELEASE" = "true" ] || [ "$PKG" != "${PKG%%-*}" ]; then
+            DIST_TAG=next
+          else
+            DIST_TAG=latest
+          fi
+          npm publish --access public --tag "$DIST_TAG"

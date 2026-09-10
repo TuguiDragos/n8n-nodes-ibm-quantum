@@ -18,5 +18,18 @@
 			}
 		]
 	},
-	"alias": ["Quantum", "Qiskit", "QPU", "OpenQASM", "IBM", "Circuit", "Sampler", "Estimator"]
+	"alias": [
+		"Quantum",
+		"Qiskit",
+		"QPU",
+		"OpenQASM",
+		"IBM",
+		"Circuit",
+		"Sampler",
+		"Estimator",
+		"Instances",
+		"Usage",
+		"Cost Limit",
+		"Quota"
+	]
 }

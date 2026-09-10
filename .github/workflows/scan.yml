@@ -27,5 +27,7 @@ jobs:
       # the scanner below, which fetches the current ruleset itself.
       - run: npm run lint
       # Then the official scanner, against the published package: provenance, the source the
-      # attestation points at, and the same lint rules the verification team runs.
-      - run: npx --yes @n8n/scan-community-package@latest n8n-nodes-ibm-quantum
+      # attestation points at, and the same lint rules the verification team runs. It prints its
+      # verdict and exits 0 either way, so the step runs `npm run scan`, which reads the verdict
+      # and fails the job on anything that is not a pass.
+      - run: npm run scan

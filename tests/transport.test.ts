@@ -3,7 +3,13 @@ import { describe, expect, it } from 'vitest';
 
 import { enrichApiError, explainTerseError, extractIbmError } from '../nodes/IbmQuantum/transport';
 
-const NODE = { name: 'IBM Quantum', type: 'ibmQuantum', typeVersion: 1, position: [0, 0], parameters: {} } as unknown as INode;
+const NODE = {
+	name: 'IBM Quantum',
+	type: 'ibmQuantum',
+	typeVersion: 1,
+	position: [0, 0],
+	parameters: {},
+} as unknown as INode;
 
 // The exact body IBM returns for the open-plan session error (code 1352).
 const IBM_BODY = {
@@ -27,7 +33,9 @@ describe('extractIbmError', () => {
 	});
 
 	it('joins multiple error messages and keeps the first solution', () => {
-		const body = { errors: [{ message: 'first bad' }, { message: 'second bad', solution: 'fix it' }] };
+		const body = {
+			errors: [{ message: 'first bad' }, { message: 'second bad', solution: 'fix it' }],
+		};
 		expect(extractIbmError({ context: { data: body } })).toEqual({
 			message: 'first bad; second bad',
 			solution: 'fix it',
@@ -76,7 +84,9 @@ describe('enrichApiError', () => {
 		const raw = { message: 'Request failed with status code 400', response: { data: IBM_BODY } };
 		const enriched = enrichApiError(NODE, raw);
 		expect(enriched).toBeInstanceOf(NodeApiError);
-		expect(enriched.message).toBe('You are not authorized to run a session when using the open plan.');
+		expect(enriched.message).toBe(
+			'You are not authorized to run a session when using the open plan.',
+		);
 		expect(enriched.description).toBe(
 			'Create an instance of a different plan type or use a different execution mode.',
 		);
@@ -85,17 +95,25 @@ describe('enrichApiError', () => {
 	it('reads context.data from a foreign-module NodeApiError shape (the production path)', () => {
 		// At runtime the incoming error is n8n's own NodeApiError (different module copy): not an
 		// instanceof ours, body lives on context.data. enrichApiError must still surface it.
-		const foreign = { name: 'NodeApiError', message: 'Bad request - please check your parameters', context: { data: IBM_BODY } };
+		const foreign = {
+			name: 'NodeApiError',
+			message: 'Bad request - please check your parameters',
+			context: { data: IBM_BODY },
+		};
 		const enriched = enrichApiError(NODE, foreign);
 		expect(enriched).toBeInstanceOf(NodeApiError);
-		expect(enriched.message).toBe('You are not authorized to run a session when using the open plan.');
+		expect(enriched.message).toBe(
+			'You are not authorized to run a session when using the open plan.',
+		);
 	});
 
 	it('enriches an already-wrapped same-module NodeApiError in place', () => {
 		const apiError = new NodeApiError(NODE, { message: 'boom', response: { data: IBM_BODY } });
 		const enriched = enrichApiError(NODE, apiError);
 		expect(enriched).toBe(apiError);
-		expect(enriched.message).toBe('You are not authorized to run a session when using the open plan.');
+		expect(enriched.message).toBe(
+			'You are not authorized to run a session when using the open plan.',
+		);
 	});
 
 	it('leaves the message untouched when the response carried no IBM detail', () => {
@@ -114,7 +132,9 @@ describe('explainTerseError', () => {
 			NODE,
 			Object.assign(new Error(`Request failed with status code ${status}`), {
 				httpCode: status,
-				context: { data: { errors: [{ code: 'not_found', message, ...(solution ? { solution } : {}) }] } },
+				context: {
+					data: { errors: [{ code: 'not_found', message, ...(solution ? { solution } : {}) }] },
+				},
 			}),
 		);
 
@@ -131,7 +151,12 @@ describe('explainTerseError', () => {
 	});
 
 	it("keeps IBM's own wording inside the new message", () => {
-		const error = explainTerseError(wrap('logs not found'), 'Logs for job', 'job-1', 'Hint.') as NodeApiError;
+		const error = explainTerseError(
+			wrap('logs not found'),
+			'Logs for job',
+			'job-1',
+			'Hint.',
+		) as NodeApiError;
 		expect(error.message).toContain('logs not found');
 		expect(error.message).toContain('job-1');
 	});

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+	accountIdFromCrn,
 	asNumberListInput,
 	characterLength,
+	MAX_SHOTS,
 	asTrimmedString,
 	handleAccount,
 	parseCsvList,
@@ -13,8 +15,9 @@ import {
 	handleJob,
 	handleSession,
 	MAX_REGISTER_SIZE,
+	MAX_SESSION_ID_LENGTH,
 } from '../nodes/IbmQuantum/operations';
-import { makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
+import { jobPost, makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 // An expression can put anything into a parameter the UI types as string or number. These tests
 // pin the behaviour for values no UI control can produce but an expression can.
@@ -33,6 +36,41 @@ describe('asTrimmedString', () => {
 		expect(asTrimmedString([1, 2])).toBe('');
 		expect(asTrimmedString(true)).toBe('');
 		expect(asTrimmedString('   ')).toBe('');
+	});
+});
+
+describe('accountIdFromCrn', () => {
+	const CRN = 'crn:v1:bluemix:public:quantum-computing:us-east:a/0123456789abcdef:inst-1::';
+
+	it('reads the id from the a/ scope field of a full CRN', () => {
+		expect(accountIdFromCrn(CRN)).toBe('0123456789abcdef');
+		expect(accountIdFromCrn(`   ${CRN}\n`)).toBe('0123456789abcdef');
+	});
+
+	it('takes the seventh field, not the first a/ it sees', () => {
+		expect(accountIdFromCrn('crn:v1:a/decoy:public:quantum-computing:us-east:a/real:inst::')).toBe(
+			'real',
+		);
+	});
+
+	it('returns null when the scope is not an account, the CRN is truncated, or the id is empty', () => {
+		expect(accountIdFromCrn('crn:v1:bluemix:public:quantum-computing:us-east:o/org:inst::')).toBe(
+			null,
+		);
+		expect(accountIdFromCrn('crn:v1:bluemix')).toBe(null);
+		expect(accountIdFromCrn('crn:v1:bluemix:public:quantum-computing:us-east:a/:inst::')).toBe(
+			null,
+		);
+		expect(accountIdFromCrn('')).toBe(null);
+	});
+
+	it('returns null for every non-text value an expression can deliver', () => {
+		expect(accountIdFromCrn(undefined)).toBe(null);
+		expect(accountIdFromCrn(null)).toBe(null);
+		expect(accountIdFromCrn({})).toBe(null);
+		expect(accountIdFromCrn([1])).toBe(null);
+		expect(accountIdFromCrn(true)).toBe(null);
+		expect(accountIdFromCrn(42)).toBe(null);
 	});
 });
 
@@ -173,6 +211,30 @@ describe('a path segment cannot traverse to another endpoint', () => {
 	});
 });
 
+// The CRN is the only identifier the node puts in a path on a host other than IBM Quantum, so the
+// same traversal guard is proved there too.
+describe('an instance CRN cannot traverse to another endpoint', () => {
+	const traversals = ['crn:v1:../../jobs', 'crn:v1:a/b?x=1', 'crn:v1:a#frag'];
+
+	for (const evil of traversals) {
+		it(`encodes an Instance CRN of ${JSON.stringify(evil)}`, async () => {
+			const { ctx, requests } = makeExecuteContext({
+				params: { instanceCrn: evil, instanceLimit: 1 },
+				http: () => ({}),
+			});
+			await handleAccount.call(ctx, TEST_CTX, 'setCostLimit', 0);
+			const url = (requests[0] as HttpCall).url as string;
+			expect(url).toBe(
+				`https://resource-controller.cloud.ibm.com/v2/resource_instances/${encodeURIComponent(evil)}`,
+			);
+			const segment = url.split('/resource_instances/')[1];
+			expect(segment).not.toContain('/');
+			expect(segment).not.toContain('?');
+			expect(segment).not.toContain('#');
+		});
+	}
+});
+
 describe('string parameters survive a non-string expression', () => {
 	it('treats a numeric Tag Search as text rather than throwing', async () => {
 		const { ctx } = makeExecuteContext({ params: { tagSearch: 12345 } });
@@ -236,7 +298,9 @@ describe('job tags are bounded before the submit', () => {
 			http: () => ({}),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'updateTags', 0);
-		expect((requests[0] as HttpCall).body).toEqual({ tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'] });
+		expect((requests[0] as HttpCall).body).toEqual({
+			tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'],
+		});
 	});
 
 	it('rejects a tag longer than 86 characters', async () => {
@@ -313,7 +377,8 @@ describe('estimator numbers are bounded to what the schema accepts', () => {
 			http: () => ({ id: 'j1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitEstimator', 0);
-		const pubs = ((requests[0] as HttpCall).body as { params: { pubs: unknown[][] } }).params.pubs;
+		const pubs = (jobPost(requests as HttpCall[]).body as { params: { pubs: unknown[][] } }).params
+			.pubs;
 		expect(typeof pubs[0][pubs[0].length - 1]).toBe('number');
 	});
 });
@@ -400,9 +465,7 @@ describe('the circuit builder refuses a repeated qubit index', () => {
 	};
 
 	it('reports the gate number and the repeated index', () => {
-		expect(buildGate('cx', '0,0')).toThrow(
-			/Gate #1: Gate 'cx' uses qubit index 0 more than once/,
-		);
+		expect(buildGate('cx', '0,0')).toThrow(/Gate #1: Gate 'cx' uses qubit index 0 more than once/);
 	});
 
 	it('refuses every affected gate', () => {
@@ -467,8 +530,9 @@ describe('a terse IBM error reaches the user with the value that caused it', () 
 	});
 });
 
-// Update Tags PUTs the full list, so anything parseCsvList drops is a tag deleted from the job.
-// `{{ $json.tags }}` hands over an array, which used to reduce to [] and clear every tag.
+// `{{ $json.tags }}` hands over an array, which used to reduce to [] and clear every tag on the job.
+// This reader stays permissive, because the filters are built on it too; requireJobTags is where a
+// list it would narrow is refused.
 describe('parseCsvList accepts what an expression really produces', () => {
 	it('keeps an array of tags instead of clearing them', () => {
 		expect(parseCsvList(['keep-me', 'and-me'])).toEqual(['keep-me', 'and-me']);
@@ -568,7 +632,7 @@ describe('the OpenQASM header check stays linear', () => {
 		expect(importCircuit('')).toThrow(/OpenQASM 3 version header/);
 	});
 
-	// 160k newlines took 25 seconds before the leading run was narrowed to [ \t].
+	// 160k newlines took 25 seconds before the leading run stopped crossing line starts.
 	it('rejects a flood of newlines promptly instead of backtracking', () => {
 		const flood = '\n'.repeat(160_000) + 'x';
 		const started = Date.now();
@@ -616,7 +680,7 @@ describe('an empty numeric parameter is not a deliberate zero', () => {
 			http: () => ({ id: 'j1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitEstimator', 0);
-		const body = (requests[0] as HttpCall).body as { params: { resilience_level: number } };
+		const body = jobPost(requests as HttpCall[]).body as { params: { resilience_level: number } };
 		expect(body.params.resilience_level).toBe(0);
 	});
 
@@ -632,7 +696,7 @@ describe('an empty numeric parameter is not a deliberate zero', () => {
 			http: () => ({ id: 'j1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitEstimator', 0);
-		const body = (requests[0] as HttpCall).body as { params: { resilience_level: number } };
+		const body = jobPost(requests as HttpCall[]).body as { params: { resilience_level: number } };
 		expect(body.params.resilience_level).toBe(2);
 	});
 
@@ -652,9 +716,14 @@ describe('an empty numeric parameter is not a deliberate zero', () => {
 	it('keeps working when the parameter is simply absent and the default applies', async () => {
 		const { ctx } = makeExecuteContext({
 			params: { includeSimulators: false },
-			http: () => ({ devices: [{ name: 'ibm_a', status: { name: 'online' }, queue_length: 1, qubits: 5 }] }),
+			http: () => ({
+				devices: [{ name: 'ibm_a', status: { name: 'online' }, queue_length: 1, qubits: 5 }],
+			}),
 		});
-		const result = (await handleBackend.call(ctx, TEST_CTX, 'getLeastBusy', 0)) as Record<string, unknown>;
+		const result = (await handleBackend.call(ctx, TEST_CTX, 'getLeastBusy', 0)) as Record<
+			string,
+			unknown
+		>;
 		expect(result.leastBusy).toBe('ibm_a');
 	});
 });
@@ -788,6 +857,26 @@ describe('lengths are counted in characters, not UTF-16 units', () => {
 		expect(characterLength('')).toBe(0);
 	});
 
+	// A high surrogate pairs with the low one immediately after it and with nothing else. These
+	// leave that pair unformed in every way a string can, and a stray surrogate is still one
+	// character, the same as spreading counted it.
+	it('counts an unpaired surrogate as one character', () => {
+		expect(characterLength('\uD83D')).toBe(1);
+		expect(characterLength('ab\uD83D')).toBe(3);
+		expect(characterLength('\uD83Dab')).toBe(3);
+		expect(characterLength('\uD83D\uE000')).toBe(2);
+		expect(characterLength('\uDE00')).toBe(1);
+		expect(characterLength(`\uDE00${EMOJI}`)).toBe(2);
+		expect(characterLength('\uFFFF')).toBe(1);
+	});
+
+	it('excerpts the first 20 characters of an over-long tag, not the first 20 units', async () => {
+		const { ctx } = makeExecuteContext({ params: { jobId: 'j1', jobTags: EMOJI.repeat(87) } });
+		await expect(handleJob.call(ctx, TEST_CTX, 'updateTags', 0)).rejects.toThrow(
+			`Tag "${EMOJI.repeat(20)}..." is 87 characters`,
+		);
+	});
+
 	it('accepts a tag of 86 emoji, which IBM accepts too', async () => {
 		const { ctx, requests } = makeExecuteContext({
 			params: { jobId: 'j1', jobTags: EMOJI.repeat(86) },
@@ -876,7 +965,7 @@ describe('optional submit fields are coerced, not cast', () => {
 			http: () => ({ id: 'j1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
-		return (requests[0] as HttpCall).body as Record<string, unknown>;
+		return jobPost(requests as HttpCall[]).body as Record<string, unknown>;
 	};
 
 	// The schema types session_id as a string; a numeric expression used to put a JSON number there.
@@ -890,6 +979,91 @@ describe('optional submit fields are coerced, not cast', () => {
 
 	it.each([[''], [null], [{}], [[]]])('omits session_id for %s', async (given) => {
 		expect(await submit({ submitSessionId: given })).not.toHaveProperty('session_id');
+	});
+
+	it('accepts a session id of 36 characters, the UUID length, and pins the bound', async () => {
+		expect(MAX_SESSION_ID_LENGTH).toBe(36);
+		const uuid = 'ff7977a5-ae7b-4509-9c84-bd1d7ff9f619';
+		expect((await submit({ submitSessionId: uuid })).session_id).toBe(uuid);
+	});
+
+	// The spec bounds shots only by int32, so a value the spec allows can still be refused by the
+	// service. Measured on ibm_fez: 2147483647 queued and then failed the job.
+	it('refuses shots above the limit the service enforces, before any request', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				shots: MAX_SHOTS + 1,
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+			`Shots is ${MAX_SHOTS + 1}; IBM accepts at most ${MAX_SHOTS} per circuit.`,
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('accepts shots at the limit, and floors a fraction below it', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				shots: MAX_SHOTS,
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
+		const atLimit = jobPost(requests as HttpCall[]).body as { params: { pubs: unknown[][] } };
+		expect(atLimit.params.pubs[0][2]).toBe(MAX_SHOTS);
+	});
+
+	// A value the clamp cannot read falls back to the default rather than failing, which is what
+	// every count field in the node does, so it must not reach the new ceiling check.
+	it('falls back to the default for a shots value below one', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				shots: -5,
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
+		const floored = jobPost(requests as HttpCall[]).body as { params: { pubs: unknown[][] } };
+		expect(floored.params.pubs[0][2]).toBe(1024);
+	});
+
+	it('refuses a session id longer than 36 characters before any request', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				shots: 1,
+				submitSessionId: 'a'.repeat(37),
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+			/Session ID is 37 characters, longer than the 36 IBM accepts/,
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('sends a numeric calibration id as text', async () => {
+		expect((await submit({ submitCalibrationId: 12345 })).calibration_id).toBe('12345');
+	});
+
+	it('trims a padded calibration id', async () => {
+		expect((await submit({ submitCalibrationId: '  cal-1  ' })).calibration_id).toBe('cal-1');
+	});
+
+	it.each([[''], [null], [{}], [[]]])('omits calibration_id for %s', async (given) => {
+		expect(await submit({ submitCalibrationId: given })).not.toHaveProperty('calibration_id');
 	});
 });
 
@@ -907,7 +1081,7 @@ describe('Layer Pair Depths must be whole numbers', () => {
 			http: () => ({ id: 'j1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitNoiseLearner', 0);
-		const body = (requests[0] as HttpCall).body as {
+		const body = jobPost(requests as HttpCall[]).body as {
 			params: { options?: { layer_pair_depths?: number[] } };
 		};
 		return body.params.options?.layer_pair_depths;
@@ -989,8 +1163,9 @@ describe('an identifier longer than the spec allows is refused', () => {
 	});
 });
 
-// Update Tags PUTs the whole list, so an empty result deletes every tag on the job. Text and arrays
-// can say that deliberately; a null or an object means the expression did not resolve to a tag list.
+// Update Tags PUTs the whole list, so an empty result deletes every tag on the job. An empty value
+// says that deliberately; a null, an object, or a list carrying an entry the node can read as
+// neither text nor a number means the expression did not resolve to a tag list.
 describe('Update Tags will not wipe a job because an expression failed', () => {
 	const update = (jobTags: unknown) => {
 		const { ctx, requests } = makeExecuteContext({
@@ -1000,11 +1175,14 @@ describe('Update Tags will not wipe a job because an expression failed', () => {
 		return { run: () => handleJob.call(ctx, TEST_CTX, 'updateTags', 0), requests };
 	};
 
-	it.each([[null], [{}], [true], [false]])('refuses %s instead of clearing the tags', async (given) => {
-		const { run, requests } = update(given);
-		await expect(run()).rejects.toThrow(/Tags must be text or a list/);
-		expect(requests).toHaveLength(0);
-	});
+	it.each([[null], [{}], [true], [false]])(
+		'refuses %s instead of clearing the tags',
+		async (given) => {
+			const { run, requests } = update(given);
+			await expect(run()).rejects.toThrow(/Tags must be text or a list/);
+			expect(requests).toHaveLength(0);
+		},
+	);
 
 	it.each([[''], ['   '], [[]]])('still clears on a deliberate empty value: %s', async (given) => {
 		const { run, requests } = update(given);
@@ -1012,10 +1190,78 @@ describe('Update Tags will not wipe a job because an expression failed', () => {
 		expect((requests[0] as HttpCall).body).toEqual({ tags: [] });
 	});
 
+	// One entry down, the same wipe: parseCsvList drops what it cannot read, so each of these
+	// reached the PUT as [] and cleared the job, except the last, which reached it as `['keep-me']`
+	// and lost the tag the unreadable entry stood for.
+	it.each([
+		['a list of objects', [{ name: 'run-a' }, { name: 'run-b' }]],
+		['a list of lists', [['a', 'b']]],
+		['a list of nulls', [null, null]],
+		['a list of booleans', [true, false]],
+		['a list of blanks', ['', '   ']],
+		['one unreadable entry among good ones', ['keep-me', { name: 'x' }]],
+	])('refuses %s instead of clearing the tags', async (_name, given) => {
+		const { run, requests } = update(given);
+		await expect(run()).rejects.toThrow(/is blank or is not text/);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('names which entry it could not read', async () => {
+		const { run } = update(['keep-me', { name: 'x' }]);
+		await expect(run()).rejects.toThrow(
+			'Tag 2 in the list is blank or is not text. Leave Tags empty to remove every tag from the job.',
+		);
+	});
+
+	// The same guard runs on Submit, where the loss is quieter still: the job goes out untagged and
+	// nothing can find it again.
+	it('refuses the same list on Submit, before any request', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				jobTags: [{ name: 'run-a' }],
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+			/Tag 1 in the list is blank or is not text/,
+		);
+		expect(requests).toHaveLength(0);
+	});
+
 	it('still writes a real list', async () => {
 		const { run, requests } = update(['keep-me', 'and-me']);
 		await run();
 		expect((requests[0] as HttpCall).body).toEqual({ tags: ['keep-me', 'and-me'] });
+	});
+
+	// An array entry is one tag, commas and all, so a list is not narrowed by the guard.
+	it('still writes a list whose entries carry commas and spaces', async () => {
+		const { run, requests } = update([' a,b ', 'c d']);
+		await run();
+		expect((requests[0] as HttpCall).body).toEqual({ tags: ['a,b', 'c d'] });
+	});
+
+	// The guard reads array entries only, so comma-separated text is still narrowed to the entries
+	// that are not empty, and a value of nothing but separators still clears the job.
+	it.each([[','], [' , ']])('still clears on separators alone: %s', async (given) => {
+		const { run, requests } = update(given);
+		await run();
+		expect((requests[0] as HttpCall).body).toEqual({ tags: [] });
+	});
+
+	it('still drops an empty entry from comma-separated text', async () => {
+		const { run, requests } = update('a,,b');
+		await run();
+		expect((requests[0] as HttpCall).body).toEqual({ tags: ['a', 'b'] });
+	});
+
+	it('still writes a numeric entry as one tag', async () => {
+		const { run, requests } = update([42, 'and-me']);
+		await run();
+		expect((requests[0] as HttpCall).body).toEqual({ tags: ['42', 'and-me'] });
 	});
 
 	// A filter has no destructive meaning, so an unusable value there is simply no filter.
@@ -1026,5 +1272,147 @@ describe('Update Tags will not wipe a job because an expression failed', () => {
 		});
 		await handleJob.call(ctx, TEST_CTX, 'list', 0);
 		expect((requests[0] as HttpCall).qs).not.toHaveProperty('tags');
+	});
+});
+
+// n8n leaves a parameter alone when its value came from an expression, so every switch in the UI
+// can arrive as text, a number or an object. These pin what each one does with the text 'false',
+// the value that used to turn on every switch read for truth, and with the text 'true', which
+// every switch compared against a literal true used to read as off.
+describe('a switch filled by an expression is read as the switch it spells', () => {
+	const submit = async (extra: Record<string, unknown>) => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				shots: 1,
+				...extra,
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
+		return jobPost(requests as HttpCall[]).body as Record<string, unknown>;
+	};
+
+	it('leaves the three suppression toggles off for the text false', async () => {
+		const body = await submit({
+			dynamicalDecoupling: 'false',
+			twirlingGates: 'false',
+			twirlingMeasure: 'false',
+		});
+		expect((body.params as Record<string, unknown>).options).toBeUndefined();
+	});
+
+	it('turns the three suppression toggles on for the text true', async () => {
+		const body = await submit({
+			dynamicalDecoupling: 'true',
+			twirlingGates: 'true',
+			twirlingMeasure: 'true',
+		});
+		expect((body.params as { options: unknown }).options).toEqual({
+			dynamical_decoupling: { enable: true },
+			twirling: { enable_gates: true, enable_measure: true },
+		});
+	});
+
+	it('refuses a suppression toggle that spells neither, before any request', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				shots: 1,
+				twirlingGates: 'on',
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await expect(handleJob.call(ctx, TEST_CTX, 'submitSampler', 0)).rejects.toThrow(
+			'Gate Twirling must be true or false.',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('marks the job private for the text true, and leaves it public for the text false', async () => {
+		expect((await submit({ privateJob: 'true' })).private).toBe(true);
+		expect(await submit({ privateJob: 'false' })).not.toHaveProperty('private');
+	});
+
+	it('sends a real boolean to the session endpoint', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { sessionId: 's1', acceptingJobs: 'false' },
+			http: () => ({}),
+		});
+		const result = await handleSession.call(ctx, TEST_CTX, 'setAccepting', 0);
+		expect((requests[0] as HttpCall).body).toEqual({ accepting_jobs: false });
+		expect(result).toEqual({ sessionId: 's1', acceptingJobs: false });
+	});
+
+	it('refuses an Accepting Jobs the endpoint could not read', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { sessionId: 's1', acceptingJobs: {} },
+			http: () => ({}),
+		});
+		await expect(handleSession.call(ctx, TEST_CTX, 'setAccepting', 0)).rejects.toThrow(
+			'Accepting Jobs must be true or false.',
+		);
+		expect(requests).toHaveLength(0);
+	});
+
+	it('keeps simulators out of the ranking for the text false', async () => {
+		const devices = {
+			devices: [
+				{ name: 'sim_one', is_simulator: true, status: { name: 'online' }, qubits: 32 },
+				{ name: 'ibm_fez', status: { name: 'online' }, qubits: 156 },
+			],
+		};
+		const off = makeExecuteContext({ params: { includeSimulators: 'false' }, http: () => devices });
+		expect((await handleBackend.call(off.ctx, TEST_CTX, 'getLeastBusy', 0)).candidates).toEqual([
+			expect.objectContaining({ name: 'ibm_fez' }),
+		]);
+		const on = makeExecuteContext({ params: { includeSimulators: 'true' }, http: () => devices });
+		expect(
+			(await handleBackend.call(on.ctx, TEST_CTX, 'getLeastBusy', 0)).candidates as unknown[],
+		).toHaveLength(2);
+	});
+
+	it('sends the analytics opt-out for the text false and refuses an unreadable one', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: { analyticsFilters: { simulators: 'false' } },
+			http: () => ({}),
+		});
+		await handleAccount.call(ctx, TEST_CTX, 'getAnalytics', 0);
+		expect((requests[0] as HttpCall).qs).toEqual({ simulators: false });
+
+		const refused = makeExecuteContext({
+			params: { analyticsFilters: { simulators: 'sometimes' } },
+			http: () => ({}),
+		});
+		await expect(handleAccount.call(refused.ctx, TEST_CTX, 'getAnalytics', 0)).rejects.toThrow(
+			'Simulators must be true or false.',
+		);
+	});
+
+	// A flag inside a collection used to be dropped when it was not a boolean, which left IBM's own
+	// default in force: measure_mitigation is on by default, so an expression writing 'false' there
+	// asked for the mitigation to stop and got it anyway.
+	it('sends a collection flag an expression spelled as text', async () => {
+		const { ctx, requests } = makeExecuteContext({
+			params: {
+				backend: 'ibm_kingston',
+				circuitFormat: 'qasm3',
+				qasm3: 'OPENQASM 3.0;\nqubit[1] q;',
+				observables: '"ZZ"',
+				resilienceOptions: { measureMitigation: 'false', zneMitigation: 'true' },
+				executionOptions: { initQubits: 'false' },
+			},
+			http: () => ({ id: 'j1' }),
+		});
+		await handleJob.call(ctx, TEST_CTX, 'submitEstimator', 0);
+		const body = jobPost(requests as HttpCall[]).body as { params: { options: unknown } };
+		expect(body.params.options).toEqual({
+			execution: { init_qubits: false },
+			resilience: { measure_mitigation: false, zne_mitigation: true },
+		});
 	});
 });

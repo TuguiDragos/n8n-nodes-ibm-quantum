@@ -51,7 +51,9 @@ describe('getResults polling loop (TEST-02)', () => {
 	it('polls until terminal, then fetches /results once and parses counts', async () => {
 		const { result, requests } = await getResults({}, (call, i) => {
 			if (isResults(call)) {
-				return { results: [{ data: { c: { samples: ['0x1', '0x1', '0x0'], num_bits: 1 } }, metadata: {} }] };
+				return {
+					results: [{ data: { c: { samples: ['0x1', '0x1', '0x0'], num_bits: 1 } }, metadata: {} }],
+				};
 			}
 			return { state: { status: i === 0 ? 'Running' : 'Completed' } };
 		});
@@ -60,6 +62,19 @@ describe('getResults polling loop (TEST-02)', () => {
 		expect(result.pubCount).toBe(1);
 		expect(vi.mocked(sleep)).toHaveBeenCalledTimes(1);
 		expect(requests.filter(isResults)).toHaveLength(1);
+	});
+
+	// A poll every few seconds re-downloaded every submitted circuit to read one status word.
+	it('polls without circuit payloads and asks /results without a query', async () => {
+		const { requests } = await getResults({}, (call, i) => {
+			if (isResults(call)) return { results: [] };
+			if (i === 1) throw { httpCode: '503', message: 'Service unavailable' };
+			return { state: { status: i < 2 ? 'Running' : 'Completed' } };
+		});
+		const polls = requests.filter((call) => !isResults(call));
+		expect(polls).toHaveLength(3);
+		for (const poll of polls) expect(poll.qs).toEqual({ exclude_params: true });
+		expect(requests.find(isResults)?.qs).toBeUndefined();
 	});
 
 	it('returns timedOut and never fetches /results when the deadline passes', async () => {
@@ -169,9 +184,23 @@ describe('getResults polling loop (TEST-02)', () => {
 		expect(result.pubCount).toBe(0);
 	});
 
+	// IBM's results schema carries a plain-string branch, `LegacyJobResults`, beside the object ones.
+	// The flag says IBM sent no body, so a string the parser cannot read must not raise it: the body
+	// arrived and is kept whole in `raw`. Deciding the flag from the shapes the reader knows is what
+	// once marked a 457 KB result unavailable.
+	it('does not flag a string result body, and keeps it in raw', async () => {
+		const { result } = await getResults({}, (call) => {
+			if (isResults(call)) return 'RESULT PAYLOAD AS TEXT';
+			return { state: { status: 'Completed' } };
+		});
+		expect(result).not.toHaveProperty('resultsAvailable');
+		expect(result.pubCount).toBe(0);
+		expect(result.raw).toBe('RESULT PAYLOAD AS TEXT');
+	});
+
 	// The noise learner puts its payload under `data`, not `results`. Testing `results` alone
 	// reported a full 1133-byte body as missing, which is the opposite of what this field promises,
-	// and llms-full.txt documents resultsAvailable:false as meaning IBM sent no body at all.
+	// and llms-full.txt documents resultsAvailable:false as a body with nothing in it to read.
 	it('does not claim a noise learner result is missing', async () => {
 		const { result } = await getResults({}, (call) => {
 			if (isResults(call)) {
@@ -230,16 +259,49 @@ describe('getResults polling loop (TEST-02)', () => {
 	});
 
 	// Returning the wrong register's counts under the requested name is a silent physics error, so
-	// the handler turns the parser's plain Error into a node error naming the available registers.
-	it('fails with a node error when the requested Register Name is absent', async () => {
-		await expect(
-			getResults({ registerName: 'syndrome' }, (call) => {
-				if (isResults(call)) {
-					return { results: [{ data: { meas: { samples: ['0x1'], num_bits: 1 } }, metadata: {} }] };
-				}
-				return { state: { status: 'Completed' } };
-			}),
-		).rejects.toThrow(/Register "syndrome" is not in this result\. Available: meas\./);
+	// the item says which register it read and which one was asked for. It says it instead of
+	// failing because the body has been fetched by then and IBM serves a private job's results once.
+	it('reports the absent Register Name and keeps the counts it did read', async () => {
+		const { result, requests } = await getResults({ registerName: 'syndrome' }, (call) => {
+			if (isResults(call)) {
+				return { results: [{ data: { meas: { samples: ['0x1'], num_bits: 1 } }, metadata: {} }] };
+			}
+			return { state: { status: 'Completed' } };
+		});
+		expect(result.registerError).toMatch(
+			/Register "syndrome" is not in this result\. Available: meas\./,
+		);
+		expect((result.pubs as Array<Record<string, unknown>>)[0]).toMatchObject({
+			register: 'meas',
+			counts: { '1': 1 },
+			requestedRegister: 'syndrome',
+			registerFallback: true,
+		});
+		expect(result.raw).toEqual({
+			results: [{ data: { meas: { samples: ['0x1'], num_bits: 1 } }, metadata: {} }],
+		});
+		expect(requests.filter(isResults)).toHaveLength(1);
+	});
+
+	// IBM's spec for a private job: "the results can only be read once. After the results are read,
+	// they are deleted from the service." The second read here answers empty, the way IBM does, so
+	// the first one is the only copy of the shots that will ever exist.
+	it("keeps a private job's only result read when the Register Name does not match", async () => {
+		let reads = 0;
+		const oneShotResults = (call: HttpCall) => {
+			if (!isResults(call)) return { state: { status: 'Completed' } };
+			reads += 1;
+			return reads === 1
+				? { results: [{ data: { c: { samples: ['0x3', '0x0', '0x3'], num_bits: 2 } } }] }
+				: {};
+		};
+		const { result } = await getResults({ registerName: 'meas' }, oneShotResults);
+		expect(result.registerError).toBe('Register "meas" is not in this result. Available: c.');
+		expect((result.pubs as Array<Record<string, unknown>>)[0].counts).toEqual({ '11': 2, '00': 1 });
+		// The retry a user would make next, once the message named the register that is there.
+		const { result: second } = await getResults({ registerName: 'c' }, oneShotResults);
+		expect(second.resultsAvailable).toBe(false);
+		expect(second.pubCount).toBe(0);
 	});
 
 	it('returns the requested register when it is present', async () => {
@@ -338,10 +400,9 @@ describe('getResults polling loop (TEST-02)', () => {
 	});
 
 	it('times out on a non-numeric maxWait instead of looping forever (NaN deadline)', async () => {
-		const { result } = await getResults(
-			{ maxWait: 'oops' as unknown as number },
-			() => ({ state: { status: 'Running' } }),
-		);
+		const { result } = await getResults({ maxWait: 'oops' as unknown as number }, () => ({
+			state: { status: 'Running' },
+		}));
 		// Falls back to the 300s default; the mocked sleep advances the clock so the loop terminates.
 		expect(result.timedOut).toBe(true);
 	});

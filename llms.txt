@@ -2,7 +2,7 @@
 
 > Verified n8n community node for IBM Quantum: build OpenQASM 3 circuits, submit them to real
 > quantum hardware through the Qiskit Runtime REST API on IBM Cloud, and trigger workflows on job
-> completion or failure. 3 nodes (1 action node and 2 polling triggers), 33 operations
+> completion or failure. 3 nodes (1 action node and 2 polling triggers), 36 operations
 > across 6 resources, zero runtime dependencies, usable as an n8n AI Agent tool.
 
 Unofficial, community-maintained package by Țugui Dragoș-Constantin; not affiliated with IBM.
@@ -15,7 +15,9 @@ connects; IBM does not refuse a non-ISA circuit, it queues the job and then fail
 per-job overhead is spent either way, and an instruction the target cannot run reports code 1517;
 sampler counts are bit-ordered with c[0] as the rightmost bit; job completion is detected by
 polling because IBM exposes no webhooks; the free Open plan allows batch sessions only and gives
-600 seconds of QPU time per 28 days, which a failed job still spends.
+600 seconds of QPU time per 28 days, which a failed job still spends; the per-instance cost limit is
+read and written through IBM Cloud's Resource Controller, a fourth host reached with the same token,
+because the Qiskit Runtime configuration endpoint is deprecated.
 
 ## Docs
 

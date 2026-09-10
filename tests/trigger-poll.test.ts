@@ -40,7 +40,12 @@ const poll = (ctx: unknown) =>
 
 describe('IbmQuantumTrigger.poll deduplication', () => {
 	it('seeds on the first poll, then never re-emits the same terminal job', async () => {
-		const jobsRef = { jobs: [{ id: 'a', status: 'completed' }, { id: 'b', status: 'failed' }] };
+		const jobsRef = {
+			jobs: [
+				{ id: 'a', status: 'completed' },
+				{ id: 'b', status: 'failed' },
+			],
+		};
 		const staticData: Record<string, unknown> = {};
 		const { ctx } = makeContext(jobsRef, staticData);
 
@@ -210,9 +215,7 @@ describe('IbmQuantumTrigger.poll response normalization (TEST-10)', () => {
 	// Reading .id off a null entry threw a raw TypeError outside the error wrapper, and a polling
 	// trigger would repeat it on every tick.
 	it('skips a null entry in the jobs array instead of throwing', async () => {
-		const result = await poll(
-			ctxWithResponse({ jobs: [null, { id: 'a', status: 'completed' }] }),
-		);
+		const result = await poll(ctxWithResponse({ jobs: [null, { id: 'a', status: 'completed' }] }));
 		expect(result![0].map((item) => item.json.id)).toEqual(['a']);
 	});
 

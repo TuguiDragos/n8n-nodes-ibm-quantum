@@ -11,6 +11,9 @@ import {
 
 export interface RequestContext {
 	baseUrl: string;
+	// The credential's instance CRN, read once with the region. Only the account operations need
+	// it, so it stays optional: every other caller, and every existing test context, omits it.
+	instanceCrn?: string;
 }
 
 // Region hosts are the single source of truth for the API base. The credential test mirrors
@@ -19,6 +22,11 @@ export interface RequestContext {
 // falling back to us-east.
 export const QUANTUM_HOST_US = 'https://quantum.cloud.ibm.com';
 export const QUANTUM_HOST_EU = 'https://eu-de.quantum.cloud.ibm.com';
+
+// Instance settings such as the cost limit live in IBM Cloud's Resource Controller, not in the
+// Qiskit Runtime API, which deprecated /instances/configuration in its favour. One host for both
+// regions, the same IAM bearer token.
+export const RESOURCE_CONTROLLER_HOST = 'https://resource-controller.cloud.ibm.com';
 
 export const REGION_HOSTS: Record<string, string> = {
 	'us-east': QUANTUM_HOST_US,
@@ -42,7 +50,10 @@ export interface ApiVersionProblem {
 // A malformed version is fatal, because it reaches IBM as a header it cannot parse and the error
 // that comes back names neither the field nor the cause. A deprecated but well-formed date only
 // warns: those versions still answer, so refusing them would break a working credential years
-// before IBM stops accepting it.
+// before IBM stops accepting it. The fatal message does not repeat what it read: this is a
+// free-text box beside the API Key box, and a key mis-pasted into it would otherwise be copied in
+// plaintext into the output item, the saved execution and an AI tool's context. The warning names
+// a value the date check has already proved is a date.
 export function checkApiVersion(value: unknown): ApiVersionProblem | null {
 	const version = typeof value === 'string' ? value.trim() : '';
 	if (!version) {
@@ -59,7 +70,7 @@ export function checkApiVersion(value: unknown): ApiVersionProblem | null {
 	if (!isRealDate) {
 		return {
 			fatal: true,
-			message: `The credential's API Version "${version}" is not a YYYY-MM-DD date. Use ${CURRENT_API_VERSION}.`,
+			message: `The credential's API Version is not a YYYY-MM-DD date. Use ${CURRENT_API_VERSION}.`,
 		};
 	}
 	if (version < CURRENT_API_VERSION) {
@@ -78,18 +89,70 @@ export function errorMessage(error: unknown): string {
 }
 
 // Preserve the context-rich errors raised downstream and wrap only raw ones, so a failure always
-// reaches the user as a node error rather than a bare exception.
+// reaches the user as a node error rather than a bare exception. Either way the error leaves
+// carrying the input item n8n points at: the one the caller named, unless the error already
+// carries one set closer to the failure. The callers with no item leave it off.
 export function asNodeError(
 	node: INode,
 	error: unknown,
 	itemIndex?: number,
 ): NodeApiError | NodeOperationError {
-	if (error instanceof NodeApiError || error instanceof NodeOperationError) return error;
+	if (error instanceof NodeApiError || error instanceof NodeOperationError) {
+		// n8n's constructor hands an already-wrapped error straight back and drops every option
+		// given with it but `failure`, so re-wrapping cannot attach the index: it has to land on
+		// the instance. One already there was set closer to the failure and stands.
+		if (itemIndex !== undefined && error.context.itemIndex === undefined) {
+			error.context.itemIndex = itemIndex;
+		}
+		return error;
+	}
 	return new NodeApiError(node, error as JsonObject, itemIndex === undefined ? {} : { itemIndex });
 }
 
 // Guard against a hung connection stalling the execution.
 const REQUEST_TIMEOUT_MS = 30000;
+
+async function authenticatedRequest(
+	this: IExecuteFunctions,
+	method: IHttpRequestMethods,
+	url: string,
+	body?: IDataObject,
+	qs?: IDataObject,
+	asText?: boolean,
+): Promise<IDataObject> {
+	const options: IHttpRequestOptions = {
+		method,
+		url,
+		json: true,
+		timeout: REQUEST_TIMEOUT_MS,
+		// IBM expects a repeated key for array query parameters (tags=a&tags=b), which is what the
+		// official client sends. n8n's default encodes them as tags[0]= or tags[]=, which the API
+		// does not recognise and silently ignores, so a tag filter would quietly return everything.
+		arrayFormat: 'repeat',
+	};
+	if (body !== undefined) options.body = body;
+	if (qs !== undefined) options.qs = qs;
+	// One endpoint, the job log, is declared text/plain by IBM. Without this axios parses a log that
+	// happens to be valid JSON into an object, and `logs` stops being the text it is documented as.
+	if (asText) options.encoding = 'text';
+
+	try {
+		const response = await this.helpers.httpRequestWithAuthentication.call(
+			this,
+			'ibmQuantumApi',
+			options,
+		);
+		// A 204, or any empty body, arrives here as null, undefined or an empty string: n8n's
+		// helper returns the axios body untouched and does not special-case 204. Passing null on
+		// would put `json: null` into the workflow, which n8n's execution engine dereferences
+		// without a null check and crashes the whole run on. An empty string does not crash, but
+		// it hands the handlers that read a field off the response, such as getLeastBusy and
+		// submitJob, a body of a different type. All three become {} so every reader sees one shape.
+		return (response === '' ? {} : (response ?? {})) as IDataObject;
+	} catch (error) {
+		throw enrichApiError(this.getNode(), error);
+	}
+}
 
 // Auth (IAM bearer token plus Service-CRN and IBM-API-Version headers) is injected by the
 // credential's preAuthentication and authenticate hooks, so none is set here and the token
@@ -101,34 +164,28 @@ export async function ibmQuantumApiRequest(
 	endpoint: string,
 	body?: IDataObject,
 	qs?: IDataObject,
+	asText?: boolean,
 ): Promise<IDataObject> {
-	const options: IHttpRequestOptions = {
-		method,
-		url: `${ctx.baseUrl}${endpoint}`,
-		json: true,
-		timeout: REQUEST_TIMEOUT_MS,
-		// IBM expects a repeated key for array query parameters (tags=a&tags=b), which is what the
-		// official client sends. n8n's default encodes them as tags[0]= or tags[]=, which the API
-		// does not recognise and silently ignores, so a tag filter would quietly return everything.
-		arrayFormat: 'repeat',
-	};
-	if (body !== undefined) options.body = body;
-	if (qs !== undefined) options.qs = qs;
+	return authenticatedRequest.call(this, method, `${ctx.baseUrl}${endpoint}`, body, qs, asText);
+}
 
-	try {
-		const response = await this.helpers.httpRequestWithAuthentication.call(
-			this,
-			'ibmQuantumApi',
-			options,
-		);
-		// A 204, or any empty body, arrives here as null. Passing that on would put `json: null`
-		// into the workflow, which n8n's execution engine dereferences without a null check and
-		// crashes the whole run on. It also protects the handlers that read a field off the
-		// response, such as getLeastBusy and submitJob.
-		return (response ?? {}) as IDataObject;
-	} catch (error) {
-		throw enrichApiError(this.getNode(), error);
-	}
+// The credential's authenticate block adds Service-CRN and IBM-API-Version to every request it
+// signs, so both reach the Resource Controller as well, which defines neither. IBM Cloud APIs
+// ignore headers they do not know; whether this one does has not been observed live.
+export async function resourceControllerRequest(
+	this: IExecuteFunctions,
+	method: IHttpRequestMethods,
+	endpoint: string,
+	body?: IDataObject,
+	qs?: IDataObject,
+): Promise<IDataObject> {
+	return authenticatedRequest.call(
+		this,
+		method,
+		`${RESOURCE_CONTROLLER_HOST}${endpoint}`,
+		body,
+		qs,
+	);
 }
 
 export interface IbmErrorDetail {

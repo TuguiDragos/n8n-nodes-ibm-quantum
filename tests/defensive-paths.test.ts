@@ -11,7 +11,7 @@ import {
 } from '../nodes/IbmQuantum/operations';
 import { parseResults, parseSamplerPub } from '../nodes/IbmQuantum/results';
 import { asNodeError, errorMessage } from '../nodes/IbmQuantum/transport';
-import { fakeNode, makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
+import { fakeNode, jobPost, makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
 // These paths exist because a catch binding is `unknown` and because n8n hands parameters back
 // untyped. They are cheap to get wrong and impossible to notice, so each one is pinned here.
@@ -49,6 +49,21 @@ describe('asNodeError', () => {
 		// The polling triggers run one item at a time and have no index to attach.
 		expect(asNodeError(node, { message: 'socket hang up' })).toBeInstanceOf(NodeApiError);
 	});
+
+	it('records the failing item on an error that arrived without one', () => {
+		// Everything the request helpers raise is wrapped by the time it gets here, and n8n ignores
+		// an itemIndex option when it is handed an error it already wrapped. Index 0 is the case a
+		// truthiness check would drop.
+		const fromIbm = new NodeApiError(node, { message: 'Instance not found' } as never);
+		const returned = asNodeError(node, fromIbm, 0) as NodeApiError;
+		expect(returned).toBe(fromIbm);
+		expect(returned.context.itemIndex).toBe(0);
+	});
+
+	it('keeps an index that was set closer to the failure', () => {
+		const inner = new NodeOperationError(node, 'bad gate', { itemIndex: 2 });
+		expect((asNodeError(node, inner, 3) as NodeOperationError).context.itemIndex).toBe(2);
+	});
 });
 
 describe('parseSamplerPub without a usable register', () => {
@@ -61,8 +76,8 @@ describe('parseSamplerPub without a usable register', () => {
 	});
 
 	// Returning another register's counts under the requested name is worse than failing, so a pub
-	// that lacks the requested register reads its own but says so. The error for a name no pub
-	// carries is raised by parseResults, which is the only caller that sees every pub.
+	// that lacks the requested register reads its own but says so. A name no pub carries is reported
+	// as registerError by parseResults, the only caller that sees every pub.
 	it('marks a fallback rather than passing another register off as the requested one', () => {
 		const data = { empty: { num_bits: 2 }, c: { num_bits: 1, samples: ['0x1'] } };
 		expect(parseSamplerPub(data, 'empty')).toMatchObject({
@@ -138,7 +153,8 @@ describe('submit with parameters n8n did not resolve to a string or object', () 
 			http: () => ({ id: 'j1' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitSampler', 0);
-		const params = (requests[0].body as Record<string, unknown>).params as Record<string, unknown>;
+		const params = (jobPost(requests as HttpCall[]).body as Record<string, unknown>)
+			.params as Record<string, unknown>;
 		expect(params.pubs).toEqual([[QASM, null, 8]]);
 	});
 
@@ -163,7 +179,8 @@ describe('submit with parameters n8n did not resolve to a string or object', () 
 			http: () => ({ id: 'j2' }),
 		});
 		await handleJob.call(ctx, TEST_CTX, 'submitEstimator', 0);
-		const params = (requests[0].body as Record<string, unknown>).params as Record<string, unknown>;
+		const params = (jobPost(requests as HttpCall[]).body as Record<string, unknown>)
+			.params as Record<string, unknown>;
 		expect(params.pubs).toEqual([[QASM, 7]]);
 	});
 });
@@ -208,6 +225,7 @@ describe('an empty response body never reaches n8n as null', () => {
 	it.each([
 		['null', () => null],
 		['undefined', () => undefined],
+		['empty string', () => ''],
 	])('turns a %s body into an empty object', async (_label, respond) => {
 		const result = await runBackend(respond);
 		expect(result[0]).toHaveLength(1);
@@ -265,16 +283,25 @@ describe('a requested register across several pubs', () => {
 		expect(pubs[1].requestedRegister).toBe('meas');
 	});
 
-	it('raises only when no pub carries the register, listing all of them', () => {
-		expect(() => parseResults(twoPubs, 'nope')).toThrow(
+	// The counts are already downloaded by the time the name is judged, and IBM hands a private
+	// job's results over once only, so a name it does not carry is reported beside them rather than
+	// taking them down with it.
+	it('reports only when no pub carries the register, listing all of them', () => {
+		const parsed = parseResults(twoPubs, 'nope');
+		expect(parsed.registerError).toMatch(
 			/Register "nope" is not in this result\. Available: meas, syndrome\./,
+		);
+		const pubs = parsed.pubs as Array<Record<string, unknown>>;
+		expect(pubs.map((p) => p.counts)).toEqual([{ '1': 1 }, { '11': 1 }]);
+		expect(pubs.every((p) => p.registerFallback === true && p.requestedRegister === 'nope')).toBe(
+			true,
 		);
 	});
 
-	it('still raises for a single pub that does not carry it', () => {
-		expect(() => parseResults({ results: [twoPubs.results[0]] }, 'syndrome')).toThrow(
-			/Available: meas\./,
-		);
+	it('still reports for a single pub that does not carry it', () => {
+		const parsed = parseResults({ results: [twoPubs.results[0]] }, 'syndrome');
+		expect(parsed.registerError).toMatch(/Available: meas\./);
+		expect((parsed.pubs as Array<Record<string, unknown>>)[0].counts).toEqual({ '1': 1 });
 	});
 
 	it('leaves the output untouched when no register is requested', () => {
@@ -292,9 +319,21 @@ describe('a requested register across several pubs', () => {
 		expect(pubs[1].register).toBe('meas');
 	});
 
+	// The body is downloaded and IBM may not serve it again, so one unreadable entry must not take
+	// the readable pubs beside it down: reading `pub.data` off a null entry threw the lot away.
+	it('reads an entry that is not an object as an empty pub and keeps the rest', () => {
+		const parsed = parseResults({ results: [null, 'not a pub', twoPubs.results[0]] }, 'meas');
+		expect(parsed.pubCount).toBe(3);
+		const pubs = parsed.pubs as Array<Record<string, unknown>>;
+		expect(pubs.slice(0, 2).map((p) => p.type)).toEqual(['estimator', 'estimator']);
+		expect(pubs[2]).toMatchObject({ register: 'meas', counts: { '1': 1 } });
+	});
+
 	it('ignores a register name on an estimator-only result', () => {
 		const parsed = parseResults({ results: [{ data: { evs: 1 }, metadata: {} }] }, 'meas');
 		expect((parsed.pubs as Array<Record<string, unknown>>)[0].type).toBe('estimator');
+		// No pub carries a classical register, so there is no name for the requested one to miss.
+		expect(parsed).not.toHaveProperty('registerError');
 	});
 });
 
@@ -360,5 +399,6 @@ describe('a collection parameter an expression did not resolve to an object', ()
 		const { ctx } = makeExecuteContext({ params: { numQubits: 1, numClbits: 0, gates: null } });
 		const result = handleCircuitBuild.call(ctx, 0) as Record<string, unknown>;
 		expect(result.gateCount).toBe(0);
+		expect(result.instructionCount).toBe(0);
 	});
 });

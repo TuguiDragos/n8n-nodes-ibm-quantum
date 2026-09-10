@@ -33,22 +33,18 @@ export class IbmQuantum implements INodeType {
 		name: 'ibmQuantum',
 		icon: { light: 'file:ibmQuantum.svg', dark: 'file:ibmQuantum.dark.svg' },
 		group: ['transform'],
-		// Version 2 renames the session Mode parameter to sessionMode. n8n's MCP server treats a
-		// parameter literally named `mode` as a node discriminator and drops it from the type
-		// definitions it hands to AI workflow builders, so on version 1 an agent cannot choose
-		// between a batch and a dedicated session. Version 1 stays loadable and unchanged.
+		// Version 2 renames the session Mode parameter to sessionMode. Observed live on 0.4.1: n8n's
+		// MCP server left a parameter named `mode` out of the type definition it hands AI workflow
+		// builders, so on version 1 an agent could not choose between a batch and a dedicated session.
+		// @n8n/workflow-sdk treats resource, operation and mode as discriminator fields, which is the
+		// likely cause; the community node path was not traced end to end, so this records what was
+		// seen rather than a documented n8n rule. Version 1 stays loadable and unchanged.
 		version: [1, 2],
 		defaultVersion: 2,
 		subtitle: '={{$parameter["operation"] + ": " + $parameter["resource"]}}',
 		description: 'Build, run and retrieve quantum circuits on the IBM Quantum Platform',
 		documentationUrl: 'https://github.com/TuguiDragos/n8n-nodes-ibm-quantum#readme',
 		defaults: { name: 'IBM Quantum' },
-		// n8n composes a tool description per operation from its action text and falls back to the
-		// node description. The replacement is written for that fallback: it tells an agent which
-		// calls are safe to make unprompted and why it cannot invent a circuit for real hardware.
-		// The reference URL belongs here rather than in documentationUrl or the codex file, because
-		// those two reach the editor UI only: n8n's MCP server hands a model the parameter
-		// definitions and nothing else, so a link is reachable only if it sits in description text.
 		usableAsTool: {
 			replacements: {
 				// The agent does not read this by default: descriptionType is 'auto', so n8n builds the
@@ -94,7 +90,8 @@ export class IbmQuantum implements INodeType {
 		const items = this.getInputData();
 		const returnData: INodeExecutionData[] = [];
 
-		// Region is constant per credential, so build the request context once, on first use.
+		// Region and instance CRN are constant per credential, so build the request context once, on
+		// first use.
 		let ctx: RequestContext | null = null;
 
 		for (let i = 0; i < items.length; i++) {
@@ -125,7 +122,10 @@ export class IbmQuantum implements INodeType {
 							throw new NodeOperationError(this.getNode(), problem.message, { itemIndex: i });
 						}
 						if (problem) this.logger.warn(problem.message);
-						ctx = { baseUrl: getBaseUrl(credentials.region as string) };
+						ctx = {
+							baseUrl: getBaseUrl(credentials.region as string),
+							instanceCrn: credentials.instanceCrn as string,
+						};
 					}
 					if (resource === 'backend') {
 						result = await handleBackend.call(this, ctx, operation, i);
