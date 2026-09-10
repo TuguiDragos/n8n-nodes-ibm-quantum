@@ -10,6 +10,10 @@ import {
 	readSupportedInstructions,
 	twoQubitStatements,
 	undefinedGateWarnings,
+	rzzAngle,
+	rzzAngleWarnings,
+	fractionalTwirlWarnings,
+	twirlingSource,
 } from '../nodes/IbmQuantum/operations';
 import { makeExecuteContext, TEST_CTX, type HttpCall } from './fakeContext';
 
@@ -181,6 +185,67 @@ describe('nonIsaInstructions with a backend set', () => {
 			nonIsaInstructions(`${HEAD}x q[0];\nrx(0.5) q[0];\ncz q[0], q[1];`, new Set(['x', 'cz'])),
 		).toEqual(['rx']);
 		expect(nonIsaInstructions(`${HEAD}rx(0.5) q[0];`)).toEqual([]);
+	});
+});
+
+describe('undefinedGateWarnings covers every basis gate stdgates.inc lacks', () => {
+	// IBM added xslow to basis_gates on all three Heron devices on 2026-09-10. Measured on
+	// ibm_kingston: a bare `xslow $0;` is accepted, queued, and fails with code 1603 naming
+	// `gate 'xslow' is not defined`, and the node had warned about nothing, since xslow is in the
+	// basis and the definition check was written for rzz alone.
+	const HERON = ['cz', 'id', 'rx', 'rz', 'rzz', 'sx', 'x', 'xslow'];
+
+	it('warns about a bare xslow call when the backend lists it', () => {
+		const warnings = undefinedGateWarnings('qasm3', `${HEAD}xslow $0;`, 'ibm_kingston', HERON);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain("gate 'xslow' is not defined");
+		expect(warnings[0]).toContain('ibm_kingston basis');
+		expect(warnings[0]).toContain('Include a gate xslow definition block');
+	});
+
+	it('stays silent on xslow when the circuit defines it', () => {
+		const source = `${HEAD}gate xslow a { x a; }\nxslow $0;`;
+		expect(undefinedGateWarnings('qasm3', source, 'ibm_kingston', HERON)).toEqual([]);
+	});
+
+	it('leaves xslow to the ISA warning when the backend does not list it', () => {
+		const older = ['cz', 'id', 'rx', 'rz', 'rzz', 'sx', 'x'];
+		expect(undefinedGateWarnings('qasm3', `${HEAD}xslow $0;`, 'ibm_fez', older)).toEqual([]);
+	});
+
+	it('reports each undefined basis gate the circuit calls, once each', () => {
+		const source = `${HEAD}rzz(0.5) $0, $1;\nxslow $0;\nxslow $1;`;
+		const warnings = undefinedGateWarnings('qasm3', source, 'ibm_kingston', HERON);
+		expect(warnings).toHaveLength(2);
+		expect(warnings[0]).toContain("gate 'rzz' is not defined");
+		expect(warnings[1]).toContain("gate 'xslow' is not defined");
+	});
+
+	it('keeps the rzz wording and the Heron basis name on the fallback basis', () => {
+		const [warning] = undefinedGateWarnings('qasm3', `${HEAD}rzz(0.5) q[0], q[1];`);
+		expect(warning).toBe(
+			"Circuit calls rzz but does not define it. rzz is in the Heron basis, yet stdgates.inc has no definition for it, so IBM fails the job with \"gate 'rzz' is not defined\". Include the gate rzz block that Qiskit's exporter writes, or express the interaction with cz and rz.",
+		);
+	});
+
+	it('ignores a basis entry that is not an identifier and every gate stdgates.inc defines', () => {
+		const odd = ['cz', 'x', 'measure_2', 'if-else', '2q', 'xslow'];
+		const source = `${HEAD}cz $0, $1;\nx $0;\nxslow $0;`;
+		const warnings = undefinedGateWarnings('qasm3', source, 'ibm_kingston', odd);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain('xslow');
+	});
+
+	it('does not read a gate name as a prefix of a longer one', () => {
+		expect(undefinedGateWarnings('qasm3', `${HEAD}xslower $0;`, 'ibm_kingston', HERON)).toEqual([]);
+	});
+
+	it('stays linear on a run of blank lines with several names to check', () => {
+		const started = Date.now();
+		expect(
+			undefinedGateWarnings('qasm3', HEAD + '\n'.repeat(160_000), 'ibm_kingston', HERON),
+		).toEqual([]);
+		expect(Date.now() - started).toBeLessThan(500);
 	});
 });
 
@@ -562,7 +627,12 @@ describe("the ISA check uses the backend's own basis", () => {
 			{ qasm3: `${NO_REGISTER}rx(0.3) q[0];`, noiseLearnerOptions: {} },
 			NIGHTHAWK,
 		);
-		expect(out.warnings).toEqual([expect.stringContaining('ibm_miami basis')]);
+		// Two warnings now: rx is outside the Nighthawk basis, and it is a fractional gate on the
+		// noise learner, which always twirls.
+		expect(out.warnings).toEqual([
+			expect.stringContaining('ibm_miami basis'),
+			expect.stringContaining('gate twirling is on through the noise learner, which always twirls'),
+		]);
 	});
 
 	it('reads the configuration once per submit, before the job, and shares it with the coupling check', async () => {
@@ -712,5 +782,145 @@ describe('noiseLearnerWarnings', () => {
 		expect(noiseLearnerWarnings('qasm3', NO_CLBITS + '\n'.repeat(160_000))).toEqual([]);
 		expect(noiseLearnerWarnings('qasm3', HEAD + ' \n'.repeat(80_000))).toEqual([]);
 		expect(Date.now() - started).toBeLessThan(1000);
+	});
+});
+
+describe('rzzAngleWarnings', () => {
+	// Measured on ibm_marrakesh on 2026-09-10: a Grover circuit transpiled by Qiskit against a bare
+	// basis_gates list carried rzz(-1.5707963267948966) and failed with code 1517, "supported only
+	// for angles in the range [0, pi/2]", after the node had warned about nothing.
+	it.each([
+		['-1.5707963267948966'],
+		['-0.7853981633974483'],
+		['1.6'],
+		['-pi/2'],
+		['pi'],
+		['3*pi/4'],
+		['2 * pi'],
+		['-0.1'],
+	])('warns about rzz(%s)', (angle) => {
+		const warnings = rzzAngleWarnings('qasm3', `${HEAD}rzz(${angle}) $0, $1;`);
+		expect(warnings).toHaveLength(1);
+		expect(warnings[0]).toContain(`(${angle.trim()})`);
+		expect(warnings[0]).toContain('supported only for angles in the range [0, pi/2]');
+	});
+
+	it.each([['0'], ['0.5'], ['1.5707963267948966'], ['pi/2'], ['pi/4'], ['0.25*pi'], ['+0.3']])(
+		'accepts rzz(%s)',
+		(angle) => {
+			expect(rzzAngleWarnings('qasm3', `${HEAD}rzz(${angle}) $0, $1;`)).toEqual([]);
+		},
+	);
+
+	it('leaves a parameter, an expression it cannot read, and a gate body alone', () => {
+		const source = `${HEAD}input float[64] theta;\ngate rzz(p0) a, b { cx a, b; rz(p0) b; cx a, b; }\nrzz(theta) $0, $1;\nrzz(pi/2 + 0.1) $0, $1;\nrzz(2*theta) $0, $1;`;
+		expect(rzzAngleWarnings('qasm3', source)).toEqual([]);
+	});
+
+	it('names each distinct offending angle once and ignores qpy', () => {
+		const source = `${HEAD}rzz(-pi/2) $0, $1;\nrzz(-pi/2) $2, $3;\nrzz(3) $0, $1;`;
+		const [warning] = rzzAngleWarnings('qasm3', source);
+		expect(warning).toContain('(-pi/2, 3)');
+		expect(rzzAngleWarnings('qpy', source)).toEqual([]);
+	});
+
+	it('reads the angle spellings Qiskit and a hand write, and refuses a zero divisor', () => {
+		expect(rzzAngle('pi')).toBeCloseTo(Math.PI);
+		expect(rzzAngle('-pi/2')).toBeCloseTo(-Math.PI / 2);
+		expect(rzzAngle('3*pi/4')).toBeCloseTo((3 * Math.PI) / 4);
+		expect(rzzAngle('1e-3')).toBeCloseTo(0.001);
+		expect(rzzAngle('pi/0')).toBeNull();
+		expect(rzzAngle('theta')).toBeNull();
+		expect(rzzAngle('')).toBeNull();
+	});
+
+	it('stays linear on a run of blank lines', () => {
+		const started = Date.now();
+		expect(rzzAngleWarnings('qasm3', HEAD + '\n'.repeat(160_000))).toEqual([]);
+		expect(Date.now() - started).toBeLessThan(500);
+	});
+});
+
+describe('fractionalTwirlWarnings', () => {
+	// Measured on ibm_marrakesh on 2026-09-10: an Estimator job at resilience 2 on an ansatz with rx,
+	// and a noise learner job on a layer carrying rzz, both queued and failed with code 1519,
+	// "Gate twirling does not support fractional gates", with no warning from the node.
+	const RX = `${HEAD}rx(0.3) $0;\ncz $0, $1;`;
+	const RZZ = `${HEAD}rzz(0.5) $0, $1;`;
+	const PLAIN = `${HEAD}sx $0;\ncz $0, $1;`;
+
+	it.each([
+		[
+			'the Gate Twirling toggle',
+			{ options: { twirling: { enable_gates: true } } },
+			'sampler',
+			'Gate Twirling',
+		],
+		[
+			'resilience level 2',
+			{ resilience_level: 2 },
+			'estimator',
+			'Resilience Level 2, which IBM twirls',
+		],
+		[
+			'PEC',
+			{ options: { resilience: { pec_mitigation: true } } },
+			'estimator',
+			'PEC Mitigation, which IBM twirls',
+		],
+		['the noise learner', {}, 'noise-learner', 'the noise learner, which always twirls'],
+	])('names %s as the twirling source', (_label, params, program, expected) => {
+		expect(twirlingSource(params, program)).toBe(expected);
+	});
+
+	it.each([
+		[{ resilience_level: 1 }, 'estimator'],
+		[{ options: { twirling: { enable_measure: true } } }, 'sampler'],
+		[{ options: { twirling: { enable_gates: false } } }, 'sampler'],
+		[{}, 'sampler'],
+	])('finds no twirling in %j', (params, program) => {
+		expect(twirlingSource(params, program)).toBeNull();
+	});
+
+	it('warns about rx and rzz under each twirling source, naming the gates found', () => {
+		const [rx] = fractionalTwirlWarnings('qasm3', RX, 'Gate Twirling');
+		expect(rx).toContain(
+			'Circuit uses rx, a fractional gate, and gate twirling is on through Gate Twirling.',
+		);
+		expect(rx).toContain('code 1519');
+		const [both] = fractionalTwirlWarnings(
+			'qasm3',
+			`${RX}\nrzz(0.2) $0, $1;`,
+			'the noise learner, which always twirls',
+		);
+		expect(both).toContain(
+			'Circuit uses rx, rzz, fractional gates, and gate twirling is on through the noise learner',
+		);
+		expect(
+			fractionalTwirlWarnings('qasm3', RZZ, 'Resilience Level 2, which IBM twirls'),
+		).toHaveLength(1);
+	});
+
+	it('stays silent without twirling, without fractional gates, and on qpy', () => {
+		expect(fractionalTwirlWarnings('qasm3', RX, null)).toEqual([]);
+		expect(fractionalTwirlWarnings('qasm3', PLAIN, 'Gate Twirling')).toEqual([]);
+		expect(fractionalTwirlWarnings('qpy', RX, 'Gate Twirling')).toEqual([]);
+	});
+
+	it('reads an rx inside a gate body and does not read rxx or a definition line as a call', () => {
+		// Qiskit writes a gate body over several lines, the calls indented, which is what is read.
+		const body = `${HEAD}gate mine a {\n  rx(0.1) a;\n}\nmine $0;`;
+		expect(fractionalTwirlWarnings('qasm3', body, 'Gate Twirling')).toHaveLength(1);
+		expect(fractionalTwirlWarnings('qasm3', `${HEAD}rxx(0.1) $0, $1;`, 'Gate Twirling')).toEqual(
+			[],
+		);
+	});
+
+	it('stays linear on a run of blank lines', () => {
+		const started = Date.now();
+		expect(fractionalTwirlWarnings('qasm3', HEAD + '\n'.repeat(160_000), 'Gate Twirling')).toEqual(
+			[],
+		);
+		expect(Date.now() - started).toBeLessThan(500);
 	});
 });

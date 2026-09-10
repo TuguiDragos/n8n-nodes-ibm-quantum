@@ -20,8 +20,9 @@ import {
 	parseNumberListStrict,
 	parseParameterNames,
 	renderInstructions,
-	validateGateInput,
+	STDGATES_INC,
 	type GateOperation,
+	validateGateInput,
 } from './qasm3';
 import { parseResults } from './results';
 
@@ -1351,18 +1352,121 @@ function isaWarnings(
 // includes that block and completes, so the definition is what separates the two cases, and only
 // the missing one is worth a warning. The Circuit Build palette writes that block itself whenever
 // it emits rzz, so a built circuit never trips this.
-export function undefinedGateWarnings(format: string, source: string): string[] {
-	if (format === 'qpy') return [];
-	// Match the call, not the definition: `gate rzz(...)` is what supplies it. The leading class is
-	// OPENQASM3_HEADER's, for the reason given there: `^\s*` under /m is quadratic.
-	const calls = /^[^\S\n\r\u2028\u2029]*rzz\b/m.test(
-		source.replace(/^[^\S\n\r\u2028\u2029]*gate\s+rzz\b.*$/gm, ''),
+// The basis gates stdgates.inc does not define: rzz on every Heron device, and xslow since IBM
+// added it to all three on 2026-09-10. Being in the basis keeps them out of the ISA warning, and
+// stdgates.inc not defining them means IBM's importer refuses a bare call, so a circuit calling one
+// without a definition passed both checks and failed after queueing. Measured on ibm_kingston:
+// `xslow $0;` on its own comes back Failed naming `gate 'xslow' is not defined`, code 1603, the
+// same failure a bare rzz draws. Names outside an identifier's shape are skipped rather than
+// escaped, since IBM's basis lists are gate names and a call to anything else cannot parse anyway.
+function undefinedBasisGates(basis: string[] | null): string[] {
+	return (basis ?? FALLBACK_BASIS_GATES).filter(
+		(name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !STDGATES_INC.has(name),
 	);
-	if (!calls) return [];
-	if (/^[^\S\n\r\u2028\u2029]*gate\s+rzz\b/m.test(source)) return [];
+}
+
+// IBM's fractional rzz takes an angle in [0, pi/2] only, and refuses the job for any other angle
+// after queueing it: measured on ibm_marrakesh on 2026-09-10, a Grover circuit Qiskit had
+// transpiled against a bare basis_gates list carried rzz(-pi/2) and came back Failed, code 1517,
+// "The instruction rzz on qubits (0, 1) is supported only for angles in the range [0, pi/2]".
+// A basis list carries no angle range, so Qiskit folds angles freely; a backend target does. The
+// scan reads each rzz call whose angle is a number, or pi scaled by a number, and leaves any other
+// spelling alone, since a parameter name or an expression cannot be judged here. Calls inside a
+// gate body carry the body's own parameter and never match; the leading class is
+// OPENQASM3_HEADER's, for the reason given there.
+const RZZ_CALL = /^[^\S\n\r\u2028\u2029]*rzz\s*\(([^)]*)\)/gm;
+const RZZ_ANGLE =
+	/^\s*([+-]?)\s*(?:(\d+(?:\.\d*)?(?:e[+-]?\d+)?)\s*(?:\*\s*(pi))?|(pi))\s*(?:\/\s*(\d+(?:\.\d*)?))?\s*$/i;
+const RZZ_MAX = Math.PI / 2;
+
+export function rzzAngle(text: string): number | null {
+	const m = RZZ_ANGLE.exec(text);
+	if (!m) return null;
+	const [, sign, num, piAfter, piAlone, divisor] = m;
+	let value = num === undefined ? 1 : Number(num);
+	if (piAfter || piAlone) value *= Math.PI;
+	if (divisor !== undefined) {
+		const d = Number(divisor);
+		if (d === 0) return null;
+		value /= d;
+	}
+	return sign === '-' ? -value : value;
+}
+
+export function rzzAngleWarnings(format: string, source: string): string[] {
+	if (format === 'qpy') return [];
+	const bad: string[] = [];
+	for (const match of source.matchAll(RZZ_CALL)) {
+		const angle = rzzAngle(match[1]);
+		if (angle === null || (angle >= 0 && angle <= RZZ_MAX + 1e-12)) continue;
+		bad.push(match[1].trim());
+	}
+	if (bad.length === 0) return [];
+	const list = [...new Set(bad)].join(', ');
 	return [
-		"Circuit calls rzz but does not define it. rzz is in the Heron basis, yet stdgates.inc has no definition for it, so IBM fails the job with \"gate 'rzz' is not defined\". Include the gate rzz block that Qiskit's exporter writes, or express the interaction with cz and rz.",
+		`Circuit calls rzz with an angle outside [0, pi/2] (${list}). IBM's fractional rzz accepts only that range and fails the job after queueing it with "supported only for angles in the range [0, pi/2]". Transpile against the backend's target rather than a bare basis_gates list, which carries no angle range, or write the interaction with cz and rz.`,
 	];
+}
+
+// IBM refuses a circuit that carries a fractional gate, rx or rzz, wherever gate twirling is on,
+// with code 1519, "Gate twirling does not support fractional gates". Twirling is on when the Gate
+// Twirling toggle or an `enable_gates` in Additional Options sets it, when the Estimator runs at
+// resilience level 2 or with PEC, both of which IBM twirls itself, and always for the noise
+// learner, which learns by twirling. Measured on ibm_marrakesh on 2026-09-10: an Estimator job at
+// resilience 2 on an ansatz with rx, and a noise learner job on a layer with rzz, both queued and
+// failed with 1519 and no warning from the node. The scan reads calls at a line start, indented
+// ones inside a gate body included, since a body that uses rx is fractional wherever it is called.
+const FRACTIONAL_CALL = /^[^\S\n\r\u2028\u2029]*(rx|rzz)\s*\(/gm;
+
+export function twirlingSource(params: IDataObject, program: string): string | null {
+	if (program === 'noise-learner') return 'the noise learner, which always twirls';
+	const options = asCollection(params.options);
+	if ((options.twirling as IDataObject | undefined)?.enable_gates === true) return 'Gate Twirling';
+	if (params.resilience_level === 2) return 'Resilience Level 2, which IBM twirls';
+	if ((options.resilience as IDataObject | undefined)?.pec_mitigation === true)
+		return 'PEC Mitigation, which IBM twirls';
+	return null;
+}
+
+export function fractionalTwirlWarnings(
+	format: string,
+	source: string,
+	twirling: string | null,
+): string[] {
+	if (format === 'qpy' || twirling === null) return [];
+	const gates = [...new Set([...source.matchAll(FRACTIONAL_CALL)].map((m) => m[1]))].sort();
+	if (gates.length === 0) return [];
+	const noun = gates.length === 1 ? 'a fractional gate' : 'fractional gates';
+	return [
+		`Circuit uses ${gates.join(', ')}, ${noun}, and gate twirling is on through ${twirling}. IBM refuses that combination with code 1519, "Gate twirling does not support fractional gates". Turn the twirling off, or transpile without fractional gates, which qiskit-ibm-runtime does with use_fractional_gates=False on the backend.`,
+	];
+}
+
+export function undefinedGateWarnings(
+	format: string,
+	source: string,
+	backend = 'IBM',
+	basis: string[] | null = null,
+): string[] {
+	if (format === 'qpy') return [];
+	const warnings: string[] = [];
+	for (const name of undefinedBasisGates(basis)) {
+		// Match the call, not the definition: `gate rzz(...)` is what supplies it. The leading class
+		// is OPENQASM3_HEADER's, for the reason given there: `^\s*` under /m is quadratic.
+		const definition = new RegExp(`^[^\\S\\n\\r\\u2028\\u2029]*gate\\s+${name}\\b`, 'm');
+		const call = new RegExp(`^[^\\S\\n\\r\\u2028\\u2029]*${name}\\b`, 'm');
+		if (definition.test(source)) continue;
+		if (!call.test(source)) continue;
+		const owner = basis ? `${backend} basis` : 'Heron basis';
+		const remedy =
+			name === 'rzz'
+				? "Include the gate rzz block that Qiskit's exporter writes, or express the interaction with cz and rz."
+				: `Include a gate ${name} definition block, or express it with the gates stdgates.inc defines.`;
+		warnings.push(
+			`Circuit calls ${name} but does not define it. ${name} is in the ${owner}, yet stdgates.inc has no definition for it, so IBM fails the job with "gate '${name}' is not defined". ${remedy}`,
+		);
+	}
+	return warnings;
 }
 
 // id passes both checks above: it is in the device basis and stdgates.inc defines it. Yet a bare
@@ -1697,10 +1801,13 @@ async function submitJob(
 	const config = await readBackendConfiguration.call(this, ctx, backend, format);
 	const basis = readBasisGates(config);
 	const supported = readSupportedInstructions(config);
+	const twirling = twirlingSource(params, primitive);
 	const warnings = [
 		...collectWarnings(sources, (entry) => [
 			...isaWarnings(format, entry, backend, basis, supported),
-			...undefinedGateWarnings(format, entry),
+			...undefinedGateWarnings(format, entry, backend, basis),
+			...rzzAngleWarnings(format, entry),
+			...fractionalTwirlWarnings(format, entry, twirling),
 			...identityGateWarnings(format, entry),
 		]),
 		...couplingWarnings(backend, sources, config?.coupling_map),
@@ -1766,10 +1873,13 @@ async function submitNoiseLearnerJob(
 	const config = await readBackendConfiguration.call(this, ctx, backend, format);
 	const basis = readBasisGates(config);
 	const supported = readSupportedInstructions(config);
+	const twirling = twirlingSource(params, 'noise-learner');
 	const warnings = [
 		...collectWarnings(sources, (entry) => [
 			...isaWarnings(format, entry, backend, basis, supported),
-			...undefinedGateWarnings(format, entry),
+			...undefinedGateWarnings(format, entry, backend, basis),
+			...rzzAngleWarnings(format, entry),
+			...fractionalTwirlWarnings(format, entry, twirling),
 			...identityGateWarnings(format, entry),
 			...noiseLearnerWarnings(format, entry),
 		]),

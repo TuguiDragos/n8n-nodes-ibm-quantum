@@ -303,18 +303,33 @@ warning names that backend and its `basis_gates` alone, for example `not in the 
 `basis_gates`, the check falls back to the Heron union (cz, id, rx, rz, rzz, sx, x), ignores
 `supported_instructions`, and the warning says `not in the IBM basis (cz, id, rx, rz, rzz, sx, x)`,
 the 0.5.0 wording. Qiskit Runtime does not transpile, so such a job is accepted, queued and then
-fails; the warning says so at submit time and never blocks the request. A second warning covers
-`rzz` called without a definition: it is in the Heron basis, but `stdgates.inc` does not define it,
-so IBM fails the job naming `gate 'rzz' is not defined`. Do not match on the reason code: the
-identical program returned 1506 and 1603 on the same device thirteen hours apart, so only the
-message is stable. Carrying Qiskit's own `gate rzz` block, the same circuit completes and is not
-warned about. A third warning covers an OpenQASM 3 circuit calling `id` in any operand form
+fails; the warning says so at submit time and never blocks the request. A second warning covers a
+basis gate called without a definition: any gate the backend lists in `basis_gates` that
+`stdgates.inc` does not define, which is `rzz` on every Heron device and, since 2026-09-10, `xslow`
+on all three, is refused by IBM's importer when called bare, naming `gate 'rzz' is not defined` or
+`gate 'xslow' is not defined`; the warning names the gate and the backend. Do not match on the
+reason code: the identical program returned 1506 and 1603 on the same device thirteen hours apart,
+so only the message is stable. Carrying Qiskit's own `gate rzz` block, the same circuit completes
+and is not warned about, and a `gate xslow` definition silences the warning the same way. A third
+warning covers an OpenQASM 3 circuit calling `id` in any operand form
 (`id q[0];`, `id $0;`, `id qr[3];`): `id` is in the basis and `stdgates.inc` defines it, as
 `U(0, 0, 0)`, yet a job carrying it failed on Heron with "the instruction u on qubits (n,) is not
 supported" (measured for 0.3.3) even though IBM lists `id` as native; remove it, identity is a
 no-op, and Circuit Build drops it for the same reason. Re-measured on 2026-09-07, IBM still fails
 it with that message, so the warning stands; `id` stays in the basis because IBM still lists it.
-A fourth check covers a two qubit gate landing on a pair the backend does not couple,
+A fourth warning covers `rzz` called with an angle outside `[0, pi/2]`, the only range IBM's
+fractional `rzz` accepts: measured on `ibm_marrakesh` on 2026-09-10, a Grover circuit Qiskit had
+transpiled against a bare `basis_gates` list carried `rzz(-1.5707963267948966)` and failed after
+queueing with code 1517, "supported only for angles in the range [0, pi/2]". The scan reads an
+angle written as a number or as `pi` scaled by a number (`-pi/2`, `3*pi/4`); a parameter name or
+any other expression is left alone. A fifth warning covers a fractional gate, `rx` or `rzz`, in a
+circuit submitted where gate twirling is on: through the Gate Twirling toggle or an `enable_gates`
+in Additional Options, through Resilience Level 2 or PEC Mitigation, which IBM twirls itself, and
+always through the noise learner, which learns by twirling. IBM refuses the combination after
+queueing with code 1519, "Gate twirling does not support fractional gates", measured on
+`ibm_marrakesh` on 2026-09-10 with an Estimator job at resilience 2 on an ansatz carrying `rx` and
+a noise learner job on a layer carrying `rzz`; the warning names the gates and the twirling source.
+A sixth check covers a two qubit gate landing on a pair the backend does not couple,
 read from `coupling_map`: both gates can be perfectly in basis and it still fires. Operands are read
 in two spellings, each with the index glued to the name: physical qubits (`$0`, what Qiskit's
 exporter writes for a transpiled circuit) and indexed registers of any name (`q[0]`, `qr[3]`), with
@@ -560,8 +575,10 @@ of 256 shots as 1, which is X, and one alone reads a 47/53 split.
 ## Hardware reality: ISA circuits and transpilation
 
 The single most common failure. The Qiskit Runtime REST API does NOT transpile. Real hardware
-executes only its native gate set (Heron processors run `rz`, `sx`, `x`, `cz`, plus measure, reset
-and barrier; check any backend with Backend Get Configuration, field `basis_gates`) over a fixed
+executes only its native gate set (on 2026-09-10 all three Heron devices this account reaches list
+`cz, id, rx, rz, rzz, sx, x, xslow`, plus measure, reset, delay and barrier; IBM extends the list,
+`xslow` was not there two days earlier, so check any backend with Backend Get Configuration, field
+`basis_gates`) over a fixed
 qubit topology. Submitting a non-ISA circuit (anything with `h`, `cx`, `u`, `ry` and so on) fails:
 
     reason_code 1517: The instruction h on qubits (0,) is not supported by the target system.
@@ -597,7 +614,15 @@ ISA circuit:
 2. Transpile locally with Qiskit (free, any plan, no live credentials needed):
    `generate_preset_pass_manager(optimization_level=1, backend=FakeFez()).run(qc)` then
    `qiskit.qasm3.dumps(isa)`, and paste or pipe the string into the node. Pin the SAME backend on
-   Submit that you transpiled for, because an ISA circuit is topology-specific. If the circuit uses
+   Submit that you transpiled for, because an ISA circuit is topology-specific. Transpile against
+   the backend (or its `target`), not against a bare `basis_gates` list with the coupling map: the
+   list carries no angle range, so Qiskit folds `rzz` angles freely and writes calls such as
+   `rzz(-pi/2)` that IBM's fractional `rzz` refuses with code 1517, measured on `ibm_marrakesh` on
+   2026-09-10 with a Grover circuit and a QFT; the node warns about such a call before the job goes
+   out. For the Estimator, lay the observables out on the transpiled circuit as well,
+   `observable.apply_layout(isa.layout)`: a four-qubit ansatz that transpilation spread over five
+   physical qubits failed with code 1501, "The number of qubits of the circuit (5) does not match
+   the number of qubits of the (0,)-th observable (4)", measured the same day. If the circuit uses
    anything OpenQASM 3 cannot express, dump it as QPY instead and submit with `circuitFormat: qpy`.
 3. IBM's AI-powered transpiler passes, from the `qiskit-ibm-transpiler` package (beta). They are a
    local drop-in for the preset passes in step 2, not a cloud service: in IBM's words the passes run
@@ -830,6 +855,8 @@ from IBM's solution text:
 | job fails, reason_code 1520, "Circuits or PUBs exceed one or more system limits" | over an IBM limit: 10 million Sampler executions per job, 30 million `rz`, 20 million `sx` or 5 million two-qubit gates per circuit, 26.8 million control-system instructions per qubit; split the work into several jobs |
 | job fails, reason_code 1521, "Incompatible circuits and/or options specified" | an options combination IBM rejects; the message names it, and the registry entry links IBM's options compatibility page |
 | job fails, reason_code 1522, "Dynamic circuits used in a V2 Estimator job" | control flow (an `if` on a measured bit) sent to `submitEstimator`; the V2 Estimator does not support it, so use `submitSampler` or drop the control flow |
+| job fails, reason_code 1501, "The number of qubits of the circuit (N) does not match the number of qubits of the observable (M)" | observables written for the logical circuit, sent with a transpiled one that spans more physical qubits; apply the transpiled layout to the observables (`apply_layout`) or transpile onto a contiguous set (measured 2026-09-10) |
+| job fails, reason_code 1217, "Session has been closed" | the job was still queued in a session when Session Close ran; Close cancels queued work rather than draining it, so set Accepting Jobs to false and wait for the queue first (measured 2026-09-10) |
 | submit fails, code 5302, "Failed to publish job: maximum payload exceeded" | the job body is too large. IBM publishes no byte figure; its remedy is fewer shots per job (under 10000) with the results stitched together, or fewer circuits per job |
 | Session Create fails, code 1352, "You are not authorized to run a session when using the {} plan" | `dedicated` on an Open instance; use `batch`, or a paid plan |
 | "gate twirling does not support fractional gates" | `twirlingGates` on with a parametrised rx or rzz; turn it off. This is the live `reason` text of the 1519 family above |

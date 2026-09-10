@@ -26,16 +26,9 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
 // A duration literal: a number and a unit, no space between them. dt is the backend sample time.
 const DURATION = /^(\d+(?:\.\d+)?)(ns|us|ms|s|dt)$/;
 
-// Names a circuit parameter cannot take: the two registers the builder declares, the built-in
-// constants, every gate stdgates.inc defines plus the builtin U and rzz, the locals of the rzz
-// block below, and the language keywords. Declaring any of them as `input float[64]` makes the
-// program invalid or silently shadows a gate.
-const RESERVED_NAMES = new Set([
-	'q',
-	'c',
-	'pi',
-	'tau',
-	'euler',
+// Every gate stdgates.inc defines, plus the builtin U. A basis gate outside this set has no
+// definition unless the circuit carries one, and IBM's importer refuses the bare call.
+export const STDGATES_INC: ReadonlySet<string> = new Set([
 	'p',
 	'x',
 	'y',
@@ -69,6 +62,19 @@ const RESERVED_NAMES = new Set([
 	'u2',
 	'u3',
 	'U',
+]);
+
+// Names a circuit parameter cannot take: the two registers the builder declares, the built-in
+// constants, every gate stdgates.inc defines plus the builtin U and rzz, the locals of the rzz
+// block below, and the language keywords. Declaring any of them as `input float[64]` makes the
+// program invalid or silently shadows a gate.
+const RESERVED_NAMES = new Set([
+	'q',
+	'c',
+	'pi',
+	'tau',
+	'euler',
+	...STDGATES_INC,
 	'rzz',
 	'p0',
 	'_gate_q_0',

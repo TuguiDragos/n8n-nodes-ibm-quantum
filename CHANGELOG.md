@@ -139,9 +139,9 @@ its first live run, listed together under Not yet verified on hardware.
   The walk stops after 50 pages, 10,000 jobs, and then adds `truncated: true` rather than running
   unbounded on a listing that grows as fast as it is read. Off by default, and with it off nothing
   changes: Limit keeps its default of 50 and its ceiling of 200, and the request is identical to
-  0.5.0. Measured live on 2026-09-07 it returned all 198 jobs of the account, which is one page at
-  200, so the walk past a page boundary is proven by unit tests against the shape the OpenAPI spec
-  documents rather than by a live history long enough to need it.
+  0.5.0. Measured live on 2026-09-07 it returned all 198 jobs of the account, one page at 200; on
+  2026-09-10, with the history at 313, it walked two pages and returned 313 jobs against a server
+  `count` of 313, with every id distinct, so the page boundary is now measured as well.
 - **Return All on Workload > Get Many too.** That listing caps at 50 per call and pages by cursor,
   so reading a month of work meant pasting `nextCursor` back into the filter by hand, once per page.
   With **Return All** on, the node asks for 50 at a time and follows the `next` link IBM sends,
@@ -474,6 +474,51 @@ its first live run, listed together under Not yet verified on hardware.
   The other 4 are the serialised spelling and are untouched. Replaying all 160 bodies through the
   reader gives output identical to what the live 0.6.0 node produced for 125 of them, 25 more that
   the serialised-encoding fix above turns from no pubs into pubs, and these 10.
+- **A warning for a fractional gate submitted where gate twirling is on.** IBM refuses a circuit
+  carrying `rx` or `rzz` wherever gate twirling runs, with code 1519, "Gate twirling does not
+  support fractional gates", and twirling runs in more places than the Gate Twirling toggle: an
+  Estimator at Resilience Level 2 or with PEC Mitigation twirls, and the noise learner always does,
+  since twirling is how it learns. Measured on `ibm_marrakesh` on 2026-09-10: an Estimator job at
+  resilience 2 on an ansatz with `rx`, and a noise learner job on a layer carrying `rzz`, were
+  accepted, queued, and failed with 1519, while the node had warned about nothing; the README had
+  described the toggle case since 0.5.0 and said nothing about the learner. Submit now reads the
+  final request, decides whether twirling is on and through what, scans the circuit for `rx` and
+  `rzz` calls, gate bodies included, and warns naming the gates and the source: `Gate Twirling`,
+  `Resilience Level 2, which IBM twirls`, `PEC Mitigation, which IBM twirls`, or `the noise
+  learner, which always twirls`. The same noise learner circuit transpiled without fractional
+  gates completed, and the documentation now says to transpile that way for those runs. Together
+  with the two warnings above this makes six submit checks, listed in llms-full.txt in order.
+- **A warning for `rzz` called outside `[0, pi/2]`, the only range IBM's fractional `rzz` runs.**
+  Qiskit transpiling against a bare `basis_gates` list with the coupling map, the shape a script
+  reaches for when no backend object is at hand, folds `rzz` angles freely, because the list
+  carries no angle range where a backend target does. Measured on `ibm_marrakesh` on 2026-09-10: a
+  Grover search and a QFT round trip transpiled that way carried `rzz(-1.5707963267948966)` and
+  `rzz(-0.7853981633974483)`, were accepted, queued, and failed with code 1517, "The instruction
+  rzz on qubits (0, 1) is supported only for angles in the range [0, pi/2]", with no warning from
+  the node, whose gate table had stated that range since 0.5.0. Every `rzz` call whose angle is a
+  number, or `pi` scaled by a number, is now read at submit time, and one warning names each
+  distinct angle outside the range; a parameter name or any other expression is left alone, since
+  it cannot be judged before IBM binds it. The same two circuits transpiled against the backend
+  without `rzz` in the list, so that Qiskit writes the interaction with `cz` and `rz`, carry no
+  such call, and the README's transpile recipe now says why the backend object is the thing to
+  pass.
+- **The undefined-gate warning now covers every basis gate `stdgates.inc` does not define, not `rzz`
+  alone.** On 2026-09-10 all three Heron devices this project reaches, `ibm_fez`, `ibm_kingston` and
+  `ibm_marrakesh`, list a new gate, `xslow`, in `basis_gates` and in `supported_instructions`; two
+  days earlier none did. Being in the basis kept it out of the ISA warning, and the definition
+  warning was written for `rzz` by name, so a circuit calling `xslow` bare passed both checks
+  silently, was accepted and queued, and failed at IBM with code 1603 naming `gate 'xslow' is not
+  defined`, measured on `ibm_kingston`: the same failure a bare `rzz` has always drawn, with no
+  warning at all. The check now takes the backend's own `basis_gates`, keeps every entry
+  `stdgates.inc` does not define, `rzz` and `xslow` today and whatever IBM adds next, and warns once
+  per such gate the circuit calls without a `gate` block of its own, naming the gate and the
+  backend. The `rzz` wording is unchanged; the other gates get the same sentence with a generic
+  remedy. One behaviour moves with it: on a device whose basis has no `rzz`, the Nighthawk devices,
+  a bare `rzz` no longer draws advice to define a gate the device cannot run, and the ISA warning
+  alone reports it, naming that device's basis. The set `stdgates.inc` defines is now named once, in
+  `qasm3.ts`, and the reserved parameter names are built on it. The ISA warning already named the
+  new gate on its own, `not in the ibm_kingston basis (cz, id, rx, rz, rzz, sx, x, xslow)`, measured
+  the same day.
 - **Session Mode and Circuit Format are bounded locally, like every other options field.** Both went
   into the work they drive without a check. A Session Mode naming neither `batch` nor `dedicated`,
   which is what an expression reading a column of free text produces, was sent as IBM's `mode` and
@@ -861,6 +906,10 @@ fall one short nor carry an operation the node does not have while the sentence 
 reads right.
 
 ### Not yet verified on hardware
+
+Every job this project has ever run through the node, with its date, backend, program, shots,
+outcome and QPU seconds, is listed in TESTING.md, together with each test round and what it
+measured; the section below is the summary.
 
 0.5.0 could say that nothing in it was claimed from reading the code. This release was written the
 same way, from IBM's OpenAPI spec (0.50.5), its guides and its SDKs, pinned by unit tests, with no
