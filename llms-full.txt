@@ -80,7 +80,7 @@ response is passed through unchanged.
 | `getConfiguration` | GET /instances/configuration | none | raw IBM body: instance configuration, including the cost limit |
 | `getAccountConfiguration` | GET /accounts/{id} | `planId` (string, optional; trimmed and sent as `plan_id` when non-empty, at most 64 characters, a number from an expression is sent as text and a value that is neither text nor a number counts as empty) | raw IBM body: `{ plans: [{ plan_id, subscription_id, subscription_name, usage_allocation_seconds, usage_limit_seconds, unallocated_usage_seconds, backends[], max_ttl, active_ttl, interactive_ttl, start_time, end_time, functions[], custom_functions }] }`, one entry per plan on the account, or the one plan asked for. The account id is not a parameter: the node reads it from the credential's `instanceCrn` (the `a/<account id>` field). A CRN without that field, or with an id outside `[A-Za-z0-9_-]{1,64}`, fails locally before any request: the message names the credential's Instance CRN, except for the ids the shared identifier guard rejects first (whitespace only, dots only, an unpaired surrogate, over 1000 characters), whose messages name Account ID, a parameter this node deliberately does not have. |
 | `getManyInstances` | GET https://resource-controller.cloud.ibm.com/v2/resource_instances?resource_id=b6049020-80f4-11eb-a0f7-e35ec9b4054f | `returnAll` (boolean, default false), `limit` (number, default 50, max 100; a value below 1 or unreadable falls back to 50; ignored when `returnAll` is true), `plan` (options: `` (Any, default), `flex`, `open`, `pay-as-you-go`, `premium`; mapped to IBM's `resource_plan_id`) | with `returnAll` off, the raw Resource Controller body `{ rows_count, next_url, resources[] }`; each resource has `crn`, `guid`, `name`, `region_id`, `resource_plan_id`, `state` and `extensions: { instance_limit_seconds, usage_allocation_seconds, backends }` (`["ANY"]` means every backend on the plan). With `returnAll` on the body is synthesized instead: the node follows `next_url` up to 20 pages of 100 and returns `{ resources, rows_count, next_url, truncated }`, `next_url` empty and `truncated` false when the listing was exhausted. |
-| `setCostLimit` | PATCH https://resource-controller.cloud.ibm.com/v2/resource_instances/{crn URL-encoded} | `clearLimit` (boolean, default false; when true the limit is removed and `instanceLimit` is ignored), `instanceLimit` (number, default 600; an integer of at least 1 when `clearLimit` is false, anything else fails before the request), `instanceCrn` (string, default empty = the credential's instance; any value must start with `crn:v1:`) | the Resource Controller's updated instance body plus `instanceLimitSeconds`: `extensions.instance_limit_seconds` read back from the response (number, or null when cleared or absent). The body sent is `{ "parameters": { "timestamp": "<now, ISO 8601>", "instance_limit_seconds": <int or null> } }`; only those two keys, so `usage_allocation_seconds` and `backends` stay unchanged. |
+| `setCostLimit` | PATCH https://resource-controller.cloud.ibm.com/v2/resource_instances/{crn URL-encoded} | `clearLimit` (boolean, default false; when true the limit is removed and `instanceLimit` is ignored), `instanceLimit` (number, default 600; an integer of at least 1 when `clearLimit` is false, anything else fails before the request), `instanceCrn` (string, default empty = the credential's instance; any value must start with `crn:v1:`) | the Resource Controller's updated instance body plus `instanceLimitSeconds`: `extensions.instance_limit_seconds` read back from the response: the limit in force. After a clear it is not null but the plan's own default, 600 on the Open plan, measured on 2026-09-10 with `response.parameters.instance_limit_seconds` null in the same body; null appears only when IBM reports no limit at all. The body sent is `{ "parameters": { "timestamp": "<now, ISO 8601>", "instance_limit_seconds": <int or null> } }`; only those two keys, so `usage_allocation_seconds` and `backends` stay unchanged. |
 | `getAnalytics` | GET /analytics/usage | `analyticsFilters` | raw IBM body: usage totals. Every usage and queue-time figure is in MILLISECONDS (the spec says so on each field), unlike `getUsage` and `getMetrics`, which report seconds. |
 | `getAnalyticsGrouped` | GET /analytics/usage_grouped | `analyticsFilters`, `groupBy` | raw IBM body: usage grouped by the chosen key, in milliseconds |
 | `getAnalyticsByDate` | GET /analytics/usage_grouped_by_date | `analyticsFilters` | raw IBM body: a usage time series, in milliseconds. The API requires `group_by`, and accepts only `instance`, so the node always sends that. |
@@ -105,7 +105,9 @@ headers present. The `timestamp` inside `parameters` is
 required because IBM silently ignores a `parameters` object identical to the previous request; the
 node sets it to the current time on every write. Read `extensions`, not `parameters`, when checking
 what is in force: `parameters` only echoes the last request. Removing a cap takes the `clearLimit`
-switch, never a zero: a Cost Limit that is not a whole number of at least 1 fails before the
+switch, and what it leaves in force is the plan's default, not no limit: measured on the Open plan,
+a clear sent `instance_limit_seconds: null`, the response echoed that null under `parameters`, and
+`extensions` reported 600, so `instanceLimitSeconds` read 600. Never a zero: a Cost Limit that is not a whole number of at least 1 fails before the
 request, so an expression that resolves to nothing cannot clear the cap by accident. Which IBM
 Cloud platform role the write requires has not been verified; IBM's cost guide says only
 administrators and owners can edit an instance. The Resource Controller path has not been exercised
@@ -472,7 +474,13 @@ Times field) and only while the workflow is ACTIVE. Manual "Fetch Test Event" re
 job without consuming state. On the very first poll they seed their cursor and emit nothing, so
 pre-existing job history never fires the workflow. Each poll scans only finished jobs
 (`pending=false`) without circuit payloads (`exclude_params=true`), remembers the last 500 seen job
-IDs, and emits only jobs not seen before.
+IDs, and emits only jobs not seen before. `limit` is the size of the scan window: when more than
+`limit` matching jobs finish between two polls, only the newest `limit` of them are emitted and
+the rest never fire (measured on 2026-09-10: five jobs finishing inside one interval with
+`limit: 2` fired the two newest).
+The seen set is workflow static data, persisted by n8n: after an n8n restart the first poll fires
+only the jobs that finished while n8n was down, once, and never the seeded history (measured on
+2026-09-10 on n8n 2.38.6, and the same trigger on n8n 2.35.7 fired a new job exactly once).
 
 `ibmQuantumTrigger` parameters:
 - `statusFilter` (labelled Trigger On; options: `any` default meaning any terminal status,
@@ -622,7 +630,12 @@ ISA circuit:
    out. For the Estimator, lay the observables out on the transpiled circuit as well,
    `observable.apply_layout(isa.layout)`: a four-qubit ansatz that transpilation spread over five
    physical qubits failed with code 1501, "The number of qubits of the circuit (5) does not match
-   the number of qubits of the (0,)-th observable (4)", measured the same day. If the circuit uses
+   the number of qubits of the (0,)-th observable (4)", measured the same day. A QPY circuit keeps
+   every qubit of the device it was transpiled for, 156 on a Heron, so its observables must be laid
+   out to that full width: a two-qubit `ZZ` sent with a QPY Bell state failed with the same code.
+   Every submit check reads OpenQASM 3 text; a QPY circuit is opaque to all of them, so it draws no
+   warning and IBM's refusal is the first signal, as it was for a QPY circuit carrying `rx` sent to
+   the noise learner, code 1519, both measured on 2026-09-10. If the circuit uses
    anything OpenQASM 3 cannot express, dump it as QPY instead and submit with `circuitFormat: qpy`.
 3. IBM's AI-powered transpiler passes, from the `qiskit-ibm-transpiler` package (beta). They are a
    local drop-in for the preset passes in step 2, not a cloud service: in IBM's words the passes run

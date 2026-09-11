@@ -8,10 +8,10 @@ listing; a job that never ran on a device reports 0.
 ## Scope and method
 
 The account behind this project has also run jobs from Qiskit and from other programs, and only
-the jobs that went through this node belong here. The list was read on 2026-09-10 at 19:31 UTC
-with **Job > Get Many**, **Return All** on and **Include Circuit Params** on, which returns every
-job with the parameters IBM stored for it. A job counts as run through the node when all three
-hold:
+the jobs that went through this node belong here. The list was read on 2026-09-10 at 20:31 UTC,
+after the last round, with **Job > Get Many**, **Return All** on and **Include Circuit Params**
+on, which returns every job with the parameters IBM stored for it. A job counts as run through the
+node when all three hold:
 
 - its program is `sampler`, `estimator` or `noise-learner`, the three the node submits;
 - `support_qiskit` appears nowhere in its `params`: `qiskit-ibm-runtime` sets that flag on every
@@ -21,12 +21,12 @@ hold:
   for the noise learner, or no parameters at all, which is what IBM stores for a job submitted with
   **Private** on, since a private job hides its inputs.
 
-Of the 313 jobs on the account, 269 pass the rule and 44 do not: 25 Sampler
-and 8 Estimator jobs carrying `support_qiskit`, 5 jobs of the `executor` program, which the node
-cannot submit, and 6 noise learner jobs of 2026-07-20 written in that program's older request
-schema, `instructions` and `schema_version`, which the node has never sent. Of the 269, 258 carry
-OpenQASM 3 text, 5 carry QPY, 2 carry a deliberately invalid circuit sent to measure the refusal,
-and 4 are private jobs with no parameters stored.
+Of the 327 jobs on the account, 283 pass the rule and 44 do not: 25 Sampler and 8 Estimator jobs
+carrying `support_qiskit`, 5 jobs of the `executor` program, which the node cannot submit, and 6
+noise learner jobs of 2026-07-20 written in that program's older request schema, `instructions`
+and `schema_version`, which the node has never sent. Of the 283, 269 carry OpenQASM 3 text, 7
+carry QPY, 2 carry a deliberately invalid circuit sent to measure the refusal, and 5 are private
+jobs with no parameters stored.
 
 Every number below comes from that listing or from the n8n execution store, decoded from the
 database n8n writes, never from a console print. A documented-shape checker holding the 45 output
@@ -37,10 +37,10 @@ builds itself, any key beyond the documented ones counts as a violation.
 
 | jobs through the node | completed | failed | cancelled | QPU seconds | first | last |
 | --- | --- | --- | --- | --- | --- | --- |
-| 269 | 176 | 66 | 27 | 1772 (29.5 minutes) | 2026-06-24 19:39 | 2026-09-10 19:27 |
+| 283 | 187 | 68 | 28 | 1799 (30.0 minutes) | 2026-06-24 19:39 | 2026-09-10 20:27 |
 
-By program: 226 Sampler, 28 Estimator, 15 Noise Learner. By backend: 122 on `ibm_fez`, 79 on
-`ibm_marrakesh`, 68 on `ibm_kingston`, all three Heron r2 devices with 156 qubits. Failed and
+By program: 238 Sampler, 29 Estimator, 16 Noise Learner. By backend: 123 on `ibm_fez`, 81 on
+`ibm_marrakesh`, 79 on `ibm_kingston`, all three Heron r2 devices with 156 qubits. Failed and
 cancelled jobs are part of the record on purpose: most were sent to measure exactly how IBM refuses
 something, and the reason codes they returned are what the documentation quotes.
 
@@ -63,7 +63,7 @@ something, and the reason codes they returned are what the documentation quotes.
 | 2026-08-30 | 1 | 1 | 0 | 0 | 3 | ibm_fez |
 | 2026-09-07 | 34 | 27 | 7 | 0 | 236 | ibm_fez, ibm_kingston, ibm_marrakesh |
 | 2026-09-08 | 18 | 11 | 3 | 4 | 89 | ibm_marrakesh |
-| 2026-09-10 | 63 | 40 | 12 | 11 | 852 | ibm_kingston, ibm_marrakesh |
+| 2026-09-10 | 77 | 51 | 14 | 12 | 879 | ibm_fez, ibm_kingston, ibm_marrakesh |
 
 The days before 2026-09-07 are the hardware runs made while building 0.1.x through 0.5.0, and
 CHANGELOG.md records, release by release, what each of them measured; the releases were dated
@@ -71,10 +71,10 @@ CHANGELOG.md records, release by release, what each of them measured; the releas
 (0.5.0). The tags of August name those runs in Romanian, `qa22h`, `qa22aug`, `faza2` and the like,
 and 2026-08-22 alone holds 80 jobs, 76 of them on `ibm_fez`, the day 0.5.0 was proved on hardware.
 The untagged jobs of June and July carry the node's request shape and no other client's markers.
-2026-09-07 and 2026-09-08 are the 0.6.0 live campaign and its hardening pass, 52 jobs and 325 QPU
-seconds, summarised under Not yet verified on hardware in CHANGELOG.md. 2026-09-10 is the
-confirmation campaign for 0.6.0 described in full below: 63 jobs and 852 QPU seconds, 14.2 minutes
-of hardware time, in seven rounds.
+2026-09-07 and 2026-09-08 are the 0.6.0 live campaign and its hardening pass, 52 jobs and 325
+QPU seconds, summarised under Not yet verified on hardware in CHANGELOG.md. 2026-09-10 is the
+confirmation campaign for 0.6.0 described in full below: 77 jobs and 879 QPU seconds, 14.7
+minutes of hardware time, in eight rounds.
 
 ## 2026-09-10: the confirmation campaign for 0.6.0
 
@@ -95,7 +95,12 @@ of hardware time, in seven rounds.
   checked with the same circuit on both, so algorithms ran on `ibm_marrakesh` and the deep-shot
   runs on `ibm_kingston`.
 - The instance cost limit was 600 seconds at the start; round 5 raised it to 2000 through
-  **Account > Set Cost Limit**, read it back, and the campaign ended at 1179 of those 2000.
+  **Account > Set Cost Limit**, read it back, and the seven rounds ended at 1179 of those 2000;
+  round 8 ended at 1209, and on 2026-09-11 the limit was set back to 600 through the same
+  operation and read back as 600.
+- Round 8 added an OpenAI credential, `gpt-4.1-mini` behind n8n's AI Agent node, for the agent
+  cases, and a second n8n, 2.35.7 on Node 22.23.2, the oldest line the README names, installed
+  on its own port from the same tarball with the same IBM credential.
 
 ### Round 1, 18:44 to 18:53 UTC: every read operation, the hardening probes, the edge cases
 
@@ -219,6 +224,71 @@ The three warnings added that day, run against the node reinstalled from the wor
 Then the 15 hardening probes again, 15 of 15, and the 37 read operations again, 37 of 37 matching
 their documented shapes.
 
+### Round 8, 19:58 to 20:30 UTC: the extended matrix, an AI agent, restarts, an older n8n
+
+Run after the seven rounds above, on the same instance, once the fixes were in. 15 jobs, 30 QPU
+seconds, every one tagged `n8n-r8`, `n8n-r8c`, `n8n-r8c2` or `n8n-smoke235`.
+
+- **The extended matrix, 48 steps, 19:58 to 20:00.** Get Least Busy ranked by queue length and by
+  each of the three wait estimates, which the Open plan answers with `null`, so all four fell back
+  to the queue and named `ibm_fez`; a minimum of 200 qubits and a Nighthawk family filter each
+  returned no candidate rather than an error. Workload Get Many paged forward twice and back once,
+  and the page reached through Previous Cursor was the first page again; the status, created
+  after, search and sort filters each returned what they asked for. Analytics with a backend
+  filter, with a date range, grouped by backend, instance, plan and user, and by date; Get Many
+  Instances with a plan filter and with Return All; Get Account Configuration with a plan filter;
+  List Tags with a search that matches nothing. A calibration id on Backend > Get Configuration
+  was refused by IBM with the plan message, as on 2026-09-07. Set Cost Limit with Clear Limit
+  read back 600, the plan default, not null, which corrected the documentation; the limit was
+  restored to 2000; a foreign CRN was refused by IBM and a malformed one locally. A session asking
+  for `maxTtl` 28800 was created with 600, the Open plan's cap; Get and Close on a session id that
+  does not exist both answered "Session not found". A QPY circuit went through Submit Estimator
+  and Submit Noise Learner with no local warning and both failed at IBM, 1501 and 1519, because
+  the submit checks read OpenQASM text and a QPY circuit is opaque to them, which the
+  documentation now says. A Private job hid its `params` on Get Status, returned its counts on
+  the first Get Results, 256 of 256 shots, and `resultsAvailable: false` on the second. A 50,000
+  shot job was cancelled while IBM reported it Running and read back Cancelled; the 4096 shot
+  Bell job of round 2 was deleted and then answered "Job not found", which is why the account
+  lists one job fewer than it did at 19:31.
+- **Version 1 nodes, 20:00.** Nine workflows saved the way 0.5.0 stores them, `typeVersion: 1`
+  with the old parameter name `mode` on Session Create: Get Least Busy, Get Usage, a batch session
+  created through `mode` and closed, a 128 shot Sampler and its results, Circuit Build, Job Get
+  Many, every one succeeded, and `mode: nonsense` was refused with the Session Mode message, so
+  the guard applies to version 1 too. A workflow holding a version 1 node and a version 2 node in
+  one graph ran both.
+- **An AI agent driving the Tool node, 20:04 to 20:05.** Five workflows with n8n's AI Agent node
+  over `gpt-4.1-mini` and the IBM Quantum Tool node on its `ai_tool` connection, judged from the
+  tool outputs stored on that connection, not from the agent's prose: a fixed Get Least Busy tool,
+  called once, answered `ibm_fez`; a Get Status tool whose Job ID is a `$fromAI` expression was
+  called once with the id extracted from the question and answered Completed; two tools in one
+  question, Get Usage and Get Least Busy, were both called once, 1189 QPU seconds and `ibm_fez`; a
+  chain the agent drove itself, Get Least Busy, then Submit Sampler on the backend it chose, then
+  Get Results, ran a 64 shot Bell state on `ibm_fez` and reported 00 in 34 and 11 in 27 shots; and
+  a Get Status tool given a job id that does not exist passed "Job not found" to the agent, which
+  reported it and invented nothing.
+- **Three executions at once, 20:06.** Job Get Many with Return All, Backend Get Properties and
+  Get Usage in three n8n processes started in the same second: 318 jobs, 156 qubits and the usage
+  figure, each in its own execution, nothing crossed over.
+- **Jobs to Scan smaller than the burst, 20:06 to 20:10.** A trigger with Jobs to Scan 2 and a
+  one minute poll, seeded, then five 32 shot jobs submitted within ten seconds; all five finished
+  inside one poll interval, and the poll fired the two newest. The window is the parameter, which
+  the documentation now says.
+- **An n8n restart with an active trigger, 20:19 to 20:29.** A trigger with Jobs to Scan 50 was
+  activated and seeded 31 job ids into its static data; n8n was stopped; with n8n down, a job was
+  submitted through `n8n execute` and ran to completion; n8n was started again with debug logging
+  on. Its first poll, the activation poll at 20:27:41, fired one execution holding exactly the
+  three jobs that had completed since the seed, that one and the two the 2.35.7 instance had sent
+  in the meantime; the two cron polls that followed fired nothing; the stored set grew from 31 to
+  34 and none of the seeded ids fired. A first attempt at 20:09 to 20:13 was inconclusive, not
+  failed: its window closed 23 seconds after the job finished, before n8n's cron, which polls at a
+  random second of each minute, had run again.
+- **n8n 2.35.7 on Node 22.23.2, 20:21 to 20:30.** All four node types registered, the error
+  trigger hidden; Get Least Busy, Get Usage, a Submit to Get Results chain with 32 of 32 shots, Get
+  Status, the local shots guard, a version 1 Get Least Busy, a version 1 session created through
+  `mode` and closed, Continue on Fail turning "Job not found" into an item with `pairedItem`; and a
+  trigger activated with a one minute poll, seeded with 31 ids, which fired a new job exactly once
+  and nothing else.
+
 ### What the day found
 
 1. **`xslow`.** On 2026-09-08 the three Heron devices listed `cz, id, rx, rz, rzz, sx, x`; on
@@ -242,18 +312,30 @@ their documented shapes.
    returned 97 with the same circuit and the same code path, and 85 per cent on a single `x`. The
    node reports what the device returns; Get Least Busy ranks by queue, as documented, and the
    least busy device can be the worst one.
+7. **Clear Limit reads back the plan default.** After Clear Limit, `instanceLimitSeconds` is 600
+   on the Open plan, not null; the documentation said null and now says what IBM returns.
+8. **QPY is opaque to the submit checks.** The ISA, identity, `rzz` angle and twirling checks read
+   OpenQASM text. A QPY circuit with `rx` under the Noise Learner failed with 1519, and a QPY
+   Estimator whose 2 qubit observables met a 156 qubit layout failed with 1501, both with no
+   warning. Documented as a property of the format, with the OpenQASM path as the way to be warned.
+9. **Jobs to Scan is a window.** Five jobs finishing inside one poll interval with the parameter
+   at 2 fired the two newest. Documented, with the default of 50 as the reason it rarely shows.
 
 Everything the node was promised to do it did: no output diverged from its documented shape in 99
 shape checks, every local bound refused before the request, Job Get Many with Return All walking
 two pages for 313 jobs with every id distinct, every warning it already had predicted the failure
 IBM then returned, and the three warnings it lacked were added and verified live the same day.
+Round 8 found no defect: the trigger's state survived an n8n restart, an AI agent drove the Tool
+node end to end, workflows saved by 0.5.0 ran unchanged, and the same tarball behaved the same on
+n8n 2.35.7 with Node 22 as on 2.38.6.
 
 ## Every job through the node
 
 Columns: created (UTC), job id, backend, program, shots per circuit for the Sampler, precision for
 the Estimator, randomisations x shots for the Noise Learner, number of circuits, final status,
 reason code when IBM gave one, QPU seconds, tags. Jobs submitted by the 2026-09-10 rounds carry an
-`n8n-r1` to `n8n-r6` or `n8n-verify` tag naming the round; earlier campaigns tagged fewer jobs.
+`n8n-r1` to `n8n-r6`, `n8n-verify`, `n8n-r8`, `n8n-r8c`, `n8n-r8c2` or `n8n-smoke235` tag naming the
+round; earlier campaigns tagged fewer jobs.
 
 | date | time | job | backend | program | shots | circuits | status | code | QPU s | tags |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -466,7 +548,6 @@ reason code when IBM gave one, QPU seconds, tags. Jobs submitted by the 2026-09-
 | 2026-09-10 | 18:52:39 | `dahfotvi3e6s738nptrg` | ibm_marrakesh | sampler | 1 | 1 | Failed | 1517 | 2 |  |
 | 2026-09-10 | 18:53:10 | `dahfp5j9k43c73aeoa5g` | ibm_marrakesh | sampler | 10000000 | 1 | Cancelled | 1305 | 2 | n8n-bound |
 | 2026-09-10 | 18:53:26 | `dahfp9ni3e6s738npuag` | ibm_marrakesh | sampler | 16 | 1 | Completed |  | 2 | n8n-clamp |
-| 2026-09-10 | 18:54:37 | `dahfpr9hvn6c73crvcp0` | ibm_kingston | sampler | 4096 | 1 | Completed |  | 3 | n8n-r2-bell |
 | 2026-09-10 | 18:54:40 | `dahfps39k43c73aeoasg` | ibm_kingston | sampler | 2048 | 1 | Completed |  | 3 | n8n-r2-ghz |
 | 2026-09-10 | 18:54:44 | `dahfpt39k43c73aeoatg` | ibm_kingston | sampler | 1024 | 1 | Completed |  | 2 | n8n-r2-deep |
 | 2026-09-10 | 18:54:46 | `dahfpthhvn6c73crvcs0` | ibm_kingston | estimator | precision | 1 | Completed |  | 18 | n8n-r2-est |
@@ -526,3 +607,18 @@ reason code when IBM gave one, QPU seconds, tags. Jobs submitted by the 2026-09-
 | 2026-09-10 | 19:27:32 | `dahg997i3e6s738nqes0` | ibm_marrakesh | sampler | 16 | 1 | Cancelled |  | 2 | n8n-verify |
 | 2026-09-10 | 19:27:37 | `dahg9a9hvn6c73crvsig` | ibm_marrakesh | estimator | precision | 1 | Cancelled |  | 2 | n8n-verify |
 | 2026-09-10 | 19:27:41 | `dahg9b8mhr3c73e6hdd0` | ibm_marrakesh | noise-learner |  | 1 | Cancelled |  | 2 | n8n-verify |
+| 2026-09-10 | 19:59:30 | `dahgo8gmhr3c73e6i0e0` | ibm_marrakesh | estimator | precision | 1 | Failed | 1501 | 2 | n8n-r8-qpy-est |
+| 2026-09-10 | 19:59:32 | `dahgo91hvn6c73cs0fkg` | ibm_marrakesh | noise-learner |  | 1 | Failed | 1519 | 2 | n8n-r8-qpy-nl |
+| 2026-09-10 | 19:59:35 | `dahgo9phvn6c73cs0fmg` | ibm_kingston | sampler |  | 0 | Completed |  | 2 | n8n-r8-private |
+| 2026-09-10 | 19:59:48 | `dahgod1hvn6c73cs0fvg` | ibm_kingston | sampler | 50000 | 1 | Cancelled |  | 2 | n8n-r8-cancel-running |
+| 2026-09-10 | 20:00:24 | `dahgom39k43c73aepeig` | ibm_kingston | sampler | 128 | 1 | Completed |  | 2 | n8n-r8-v1 |
+| 2026-09-10 | 20:05:28 | `dahgr1phvn6c73cs0k10` | ibm_fez | sampler | 64 | 1 | Completed |  | 2 | n8n-r8-agent |
+| 2026-09-10 | 20:07:16 | `dahgrt0mhr3c73e6i620` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c-burst |
+| 2026-09-10 | 20:07:19 | `dahgrtr9k43c73aepj30` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c-burst |
+| 2026-09-10 | 20:07:21 | `dahgrub9k43c73aepj4g` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c-burst |
+| 2026-09-10 | 20:07:24 | `dahgrv0mhr3c73e6i64g` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c-burst |
+| 2026-09-10 | 20:07:26 | `dahgrvni3e6s738nr7mg` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c-burst |
+| 2026-09-10 | 20:11:13 | `dahgtob9k43c73aepku0` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c-restart |
+| 2026-09-10 | 20:21:36 | `dahh2k39k43c73aeppfg` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-r8c2-restart |
+| 2026-09-10 | 20:23:02 | `dahh39hhvn6c73cs0s40` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-smoke235 |
+| 2026-09-10 | 20:27:13 | `dahh58fi3e6s738nrgsg` | ibm_kingston | sampler | 32 | 1 | Completed |  | 2 | n8n-smoke235-trigger |

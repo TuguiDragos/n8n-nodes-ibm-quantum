@@ -22,7 +22,9 @@ its first live run, listed together under Not yet verified on hardware.
   Resource Controller instead. Its guide documents `PATCH /v2/resource_instances/{crn}` with `{
   parameters: { timestamp, instance_limit_seconds } }`, the same IAM bearer token, and one rule that
   is easy to miss: a `parameters` object identical to the previous one is silently ignored, so every
-  write the node sends carries the current time. A **Clear Limit** switch removes the cap; **Cost
+  write the node sends carries the current time. A **Clear Limit** switch removes the cap, and IBM
+  then reports the plan's default in `extensions`, 600 seconds on the Open plan, which is what
+  `instanceLimitSeconds` reads back after a clear, measured on 2026-09-10; **Cost
   Limit (Seconds)** is a whole number of at least one second, and anything unreadable fails before
   the request, so an expression that resolves to nothing can no longer clear a cap the way the 0.4.x
   "zero clears it" contract allowed. The response is the updated instance with
@@ -930,6 +932,17 @@ all 198 jobs of a history that pages at 200; the cursor inside the Workload Get 
 base64 of a timestamp and round-tripped through the Next Cursor filter to the second page; and a
 bare `id`, which still fails a job, with the same "the instruction u on qubits" message the warning
 quotes, so the warning stands.
+
+Measured later the same day, in an eighth round: the trigger's seen set survives an n8n restart, so
+the first poll after a restart fires the jobs that finished while n8n was down, once, and never
+the history it had seeded; Jobs to Scan is a window, five jobs finishing inside one poll interval
+with the parameter at 2 fired the two newest; Clear Limit reads back the plan default, 600 seconds
+on the Open plan; a QPY circuit passes the submit checks unread, so a fractional gate under the
+Noise Learner and a 2 qubit observable against a 156 qubit layout failed at IBM with 1519 and 1501
+and no warning; n8n's AI Agent drove the Tool node through `$fromAI` parameters, two tools in one
+question, a submit to results chain it chose itself, and a tool error it reported without
+inventing; workflows saved by 0.5.0 with `typeVersion: 1` ran unchanged; three executions at once
+shared nothing; and the same tarball behaved the same on n8n 2.35.7 with Node 22.23.2.
 
 Not settled, and why: the basis text for a Nighthawk device and the ISA warning against one, because
 the account sees only Heron devices; `calibration_id`, which reached IBM on both backend reads and
