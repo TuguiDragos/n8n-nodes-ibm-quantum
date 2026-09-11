@@ -2,7 +2,23 @@
 
 All notable changes to this package are documented in this file.
 
-## 0.6.0 (unreleased)
+## 0.6.0 (2026-09-11)
+
+**In short.** Three operations are new, Get Account Configuration, Get Many Instances and Set Cost
+Limit, for 36 across the same six resources. Job Get Many and Workload Get Many gain Return All;
+Get Least Busy ranks by IBM's wait estimates and filters by processor family; both backend reads
+and every Submit take a calibration id; the primitive options are fields; `rzz` and `delay` join
+the palette, with symbolic angles. The submit warnings are judged against the backend you chose
+and now also catch an identity gate, a basis gate `stdgates.inc` does not define, such as `xslow`,
+an `rzz` angle outside `[0, pi/2]` and a fractional gate where twirling is on. Get Results reads
+the encodings IBM uses for jobs submitted from Qiskit and its older array encoding; Shots, Session
+Mode, Circuit Format and the Additional Options keys are checked before the request, like every
+other bound. Five logic defects from the audit of 4 September are fixed, a circuit of blank lines
+no longer freezes n8n, and a failing item names itself. The toolchain moves onto n8n 2.38, Node 24
+and n8n's verification scanner, CI runs the lint n8n's verification runs, and the suite goes from
+669 to 1161 tests at 100% coverage. The whole release was run on hardware, 129 jobs and 1204 QPU
+seconds on three Heron devices, every one listed in TESTING.md; the few things the Open plan
+cannot measure are named under Verified on hardware. The entries below carry the detail.
 
 Three new operations, bringing the node to 36 operations across the same six resources, and the
 first release driven by an audit rather than by a hardware run. The audit of 4 September 2026 read
@@ -10,9 +26,9 @@ every file in the repository, compared every request the node builds with IBM's 
 0.50.5, ran the node in a live n8n 2.37.10, and found five logic defects, one UI example the schema
 refuses, ten points where the documentation and the process had drifted from IBM or from n8n, and
 two endpoints the node did not cover although the credential already held everything they need.
-Every finding is closed below. The difference from 0.5.0 is stated plainly in each entry: what was
-measured on a device, and what was built from the spec and IBM's guides and is still waiting for
-its first live run, listed together under Not yet verified on hardware.
+Every finding is closed below. The release was then run on hardware, on 7, 8 and 10 September
+2026, 129 jobs and 1204 QPU seconds through the node, and each entry says what was measured; the
+few things the Open plan cannot measure are listed under Verified on hardware.
 
 ### Added
 
@@ -43,7 +59,7 @@ its first live run, listed together under Not yet verified on hardware.
   Both calls have since run against a live Open plan account and behave as documented: the Get
   Many Instances read, and a Set Cost Limit write that was set to a second value, read back and
   restored, which also settles that the Resource Controller tolerates the `Service-CRN` and
-  `IBM-API-Version` headers the credential adds. Under Not yet verified on hardware below.
+  `IBM-API-Version` headers the credential adds. Under Verified on hardware below.
 - **Account > Get Account Configuration, the endpoint this changelog said a workflow could never
   reach.** `GET /v1/accounts/{id}` wants an account id, and 0.4.1 recorded that nothing in the API
   returns one. The credential had it all along: an instance CRN reads
@@ -57,7 +73,7 @@ its first live run, listed together under Not yet verified on hardware.
   narrows it to one plan, bounded locally to the 64 characters the spec allows. Get Usage and Get
   Instance stay the per-instance reads; this is the account-wide one, and it is one of three
   operations this release adds. Built from the OpenAPI spec (0.50.5) and pinned by tests, and since
-  answered by a live account as documented, under Not yet verified on hardware below.
+  answered by a live account as documented, under Verified on hardware below.
 - **The primitive options are fields.** Sampler and Estimator submits gain **Dynamical Decoupling
   Options**, **Twirling Options** and **Execution Options**, and the Estimator gains **Resilience
   Options**, **Default Precision** and **Seed Estimator**. Between them they cover every key the
@@ -890,7 +906,7 @@ its first live run, listed together under Not yet verified on hardware.
   ESLint, because `eslint .` walks it after a local `test:coverage` run while the lint script, which
   names its paths, never did.
 
-The suite goes from 669 to 1099 tests, still at 100% statement, branch, function and line coverage.
+The suite goes from 669 to 1161 tests, still at 100% statement, branch, function and line coverage.
 One new metadata test reads every operation value and every parameter name, nested collection
 fields included, out of `descriptions.ts` and fails unless `llms-full.txt` names each one and
 `README.md` names each operation, so the file an assistant reads can no longer fall behind the UI
@@ -907,18 +923,19 @@ that resource, and unless the rows are exactly the resources the node has, so th
 fall one short nor carry an operation the node does not have while the sentence above it still
 reads right.
 
-### Not yet verified on hardware
+### Verified on hardware
 
 Every job this project has ever run through the node, with its date, backend, program, shots,
 outcome and QPU seconds, is listed in TESTING.md, together with each test round and what it
-measured; the section below is the summary.
+measured; this section is the summary.
 
 0.5.0 could say that nothing in it was claimed from reading the code. This release was written the
 same way, from IBM's OpenAPI spec (0.50.5), its guides and its SDKs, pinned by unit tests, with no
-credential available to the audit. It has since been run against a live Open plan account in
-`us-east` on 2026-09-07, all 36 operations and 14 jobs on `ibm_fez`, `ibm_marrakesh` and
-`ibm_kingston` for 34 QPU seconds in total, and almost every entry below moved from claimed to
-measured.
+credential available to the audit. It was then run against a live Open plan account in `us-east`:
+on 2026-09-07 and 2026-09-08 the live campaign and its hardening pass, all 36 operations, 52 jobs
+and 325 QPU seconds; on 2026-09-10 the confirmation campaign, eight rounds, 77 jobs and 879 QPU
+seconds. In all 129 jobs and 1204 QPU seconds on `ibm_fez`, `ibm_marrakesh` and `ibm_kingston`,
+and every entry above that the Open plan can measure moved from claimed to measured.
 
 Measured, and behaving as documented: `GET /v1/accounts/{id}` behind Get Account Configuration; both
 Resource Controller calls, the Get Many Instances read and the Set Cost Limit write, which was set
@@ -928,12 +945,13 @@ Least Busy asked for and IBM answered with none, so the documented fallback rank
 the option collections on Sampler and Estimator, an Estimator job carrying all four of them
 returning 0.95 and 0.999 for `ZZ` and `XX` on a Bell state; `rzz`, `delay` and the `input`
 declarations, which completed on hardware in one circuit; Return All on Job Get Many, which returned
-all 198 jobs of a history that pages at 200; the cursor inside the Workload Get Many links, which is
+all 198 jobs of a history that pages at 200, and on 2026-09-10 the two pages of a history of 313
+with every id distinct; the cursor inside the Workload Get Many links, which is
 base64 of a timestamp and round-tripped through the Next Cursor filter to the second page; and a
 bare `id`, which still fails a job, with the same "the instruction u on qubits" message the warning
 quotes, so the warning stands.
 
-Measured later the same day, in an eighth round: the trigger's seen set survives an n8n restart, so
+Measured on 2026-09-10, in the eighth round: the trigger's seen set survives an n8n restart, so
 the first poll after a restart fires the jobs that finished while n8n was down, once, and never
 the history it had seeded; Jobs to Scan is a window, five jobs finishing inside one poll interval
 with the parameter at 2 fired the two newest; Clear Limit reads back the plan default, 600 seconds
@@ -944,14 +962,17 @@ question, a submit to results chain it chose itself, and a tool error it reporte
 inventing; workflows saved by 0.5.0 with `typeVersion: 1` ran unchanged; three executions at once
 shared nothing; and the same tarball behaved the same on n8n 2.35.7 with Node 22.23.2.
 
-Not settled, and why: the basis text for a Nighthawk device and the ISA warning against one, because
-the account sees only Heron devices; `calibration_id`, which reached IBM on both backend reads and
-was refused with "You are not authorized to use custom calibrations with your current service plan",
-so the wiring is confirmed and the behaviour is not; the order a positional array binds parameters
-in, measured against Qiskit locally, where the importer sorts them by name, and not through a
-submitted job; and session `dedicated` mode, which the Open plan refuses, as the field says. The
-writes and submits above were one-shot jobs of about two QPU seconds each; both are on the release
-checklist, and the entries above will be amended with what is measured.
+Not measurable on the Open plan, and why: the basis text for a Nighthawk device and the ISA warning
+against one, because the account sees only Heron devices; `calibration_id`, which reached IBM on
+both backend reads and was refused with "You are not authorized to use custom calibrations with
+your current service plan", so the wiring is confirmed and the behaviour is not; session
+`dedicated` mode, which the plan refuses, as the field says; IBM's estimated wait times, which the
+plan answers with none, so Get Least Busy ranked by queue length on every live run and its ranking
+by wait ran only in the suite; a session longer than the plan's cap, since IBM clamps `max_ttl` to
+600 seconds here; the 429 rate limit, which never occurred in 283 jobs and cannot be provoked on
+purpose; and the order a positional array binds parameters in, measured against Qiskit locally,
+where the importer sorts them by name, and not through a submitted job. These stay pinned by unit
+tests.
 
 ### Dependencies
 

@@ -72,7 +72,7 @@ CHANGELOG.md records, release by release, what each of them measured; the releas
 and 2026-08-22 alone holds 80 jobs, 76 of them on `ibm_fez`, the day 0.5.0 was proved on hardware.
 The untagged jobs of June and July carry the node's request shape and no other client's markers.
 2026-09-07 and 2026-09-08 are the 0.6.0 live campaign and its hardening pass, 52 jobs and 325
-QPU seconds, summarised under Not yet verified on hardware in CHANGELOG.md. 2026-09-10 is the
+QPU seconds, summarised under Verified on hardware in CHANGELOG.md. 2026-09-10 is the
 confirmation campaign for 0.6.0 described in full below: 77 jobs and 879 QPU seconds, 14.7
 minutes of hardware time, in eight rounds.
 
