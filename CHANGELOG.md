@@ -2,6 +2,102 @@
 
 All notable changes to this package are documented in this file.
 
+## 0.6.1 (2026-10-07)
+
+**In short.** No change to what the node does: the compiled `dist` is byte for byte the one 0.6.0
+shipped. The package gains a website, n8n-nodes-ibm-quantum.tuguidragos.com, which npm now lists
+as its homepage beside a sponsor link; the documentation stops saying Set Cost Limit was never run
+against a live account, which TESTING.md shows it was; and the toolchain moves onto what n8n 2.42
+ships, TypeScript 6 included.
+
+### Added
+
+- **n8n-nodes-ibm-quantum.tuguidragos.com, built from this repository.** `website/` holds the
+  build and `.github/workflows/website.yml` publishes it to GitHub Pages on every push to `main`.
+  No figure on the page is typed in: the resources and operations come from the built node, the
+  test count and coverage from a `vitest run --coverage` on the same tree, the hardware jobs, QPU
+  seconds, devices and dates from the totals in TESTING.md, the version from `package.json`, and
+  the 12-gate Bell circuit from the node's own Circuit > Build code. Every sentence the page
+  quotes from README.md, SECURITY.md or TESTING.md is checked against them, a gate added to the
+  palette must be placed among the native or the transpile-first gates, and a build whose claim no
+  longer holds stops there, leaving the published page as it was. AGENTS.md says so, because
+  rewording one of those sentences now fails the Website workflow. The folder is outside `files`,
+  so the tarball is unchanged by it, and Dependabot watches its one package, `shiki`.
+- **`homepage` is the website, and `funding` points at GitHub Sponsors.** npm showed
+  tuguidragos.com as the package's homepage; it now shows the project's own site, and `npm fund`
+  and the package page list `https://github.com/sponsors/TuguiDragos`. `.github/FUNDING.yml`
+  declares the same account, in the form tapetum and qxlint use, so the repository shows a
+  Sponsor button. The README carries a badge for the site and `llms.txt` links it.
+
+### Fixed
+
+- **README.md and llms-full.txt said the Resource Controller path behind Set Cost Limit "has not
+  been exercised from this project against a live account".** It had been, on 2026-09-10, in the
+  campaign this changelog records under 0.6.0: a write raised the limit from 600 to 2000 seconds
+  and read back 2000, Clear Limit read back the plan default of 600, and a foreign CRN was refused
+  by IBM. Both now say so, and keep the one thing still unmeasured, which IBM Cloud role the write
+  requires. llms-full.txt ships in the tarball, so 0.6.0 carries the stale sentence.
+- llms-full.txt said every request has a 30 second timeout. Every request the node itself issues
+  does; the IAM token exchange and the credential test take n8n's defaults, as SECURITY.md and the
+  README already said. Its list of the community package variables n8n reads now names 2.42, after
+  a check against the n8n 2.42.4 source, where the list and the defaults are unchanged.
+- AGENTS.md still described Session > Create copying an empty Session Mode into `mode`, which 0.6.0
+  fixed, and its layout table now lists `loadOptions.ts`. The pull request checklist asked for
+  `npm test` where CI runs `npm run test:coverage`, and the test meant to hold the two together
+  pinned that; it now compares the checklist with the steps in `ci.yml`.
+- SECURITY.md described the `npm audit` findings as they stood at 0.6.0. Advisories published
+  since then on `axios`, `braces` and `stream-json` changed the count; the section now lists the
+  findings as they stand, and why none of them can be closed from here.
+
+### Changed
+
+- **TypeScript 5.9 to 6.0.3, and `tsconfig.json` leaves `moduleResolution: node10`.** TypeScript
+  6 refuses node10 resolution unless `ignoreDeprecations` silences it, and 7 removes it. Rather
+  than silence it, `module` is now `node20`, which resolves the way Node itself does and still
+  emits CommonJS, since `package.json` declares no `type`. The output is identical: a build under
+  5.9.3 with the old settings and one under 6.0.3 with the new compare equal file for file, the
+  declarations and source maps included. TypeScript 7 stays out of reach for another reason,
+  `typescript-eslint` supporting `>=4.8.4 <6.1.0`, and the Dependabot note says that now.
+
+### Dependencies
+
+- `n8n-workflow` 2.38.1 to 2.42.2, the version `npm view n8n dependencies.n8n-workflow` reports
+  for n8n 2.42.4, the `stable` release on 2026-10-07. Dependabot's grouped pull request of 1
+  October proposed 2.41.0, behind what n8n ships by then, and failed CI on Node 22 with "Missing:
+  ignore@7.0.11 from lock file", the npm 10 and npm 11 split AGENTS.md describes; this release
+  takes every bump it carried, at newer versions, and supersedes it.
+- `@n8n/node-cli` 0.47.2 to 0.51.3 and `@n8n/eslint-plugin-community-nodes` 0.32.0 to 0.35.0, the
+  ruleset the 0.38.0 verification scanner and the CLI both bundle. The one difference between the
+  two rulesets' recommended configs is `valid-node-categories`, new at error, which the three
+  nodes pass.
+- `typescript-eslint` 8.70.0 to 8.71.1, `vitest` and `@vitest/coverage-v8` 5.0.0 to 5.0.3,
+  `prettier` 3.9.6 to 3.9.9, `@types/node` 26.5.1 to 26.6.4, the version its `ts6.0` tag names,
+  and `globals` 17.12.0 to 17.13.0. `eslint` and `@eslint/js` stay at 9.29.0, which the n8n
+  ruleset's peer still pins exactly. Every devDependency is now on the newest release its
+  constraints allow, and every GitHub Action on its newest major.
+- `brace-expansion` 1.1.18 to 1.1.21 and 5.0.9 to 5.0.12 inside the lockfile, which `eslint` and
+  the n8n ruleset reach through `minimatch`, closing three advisories with in-range fixes. `npm
+  audit` now reports 17 findings, 6 moderate and 11 high, on 19 advisories across `axios`, `qs`,
+  `stream-json`, `uuid` and `braces`, every one behind an exact pin in `n8n-workflow` or in the
+  `@n8n/node-cli` tree, and none in what ships: the package still declares no `dependencies`.
+  SECURITY.md lists them.
+- The lockfile carries `node_modules/@n8n/ai-utilities/node_modules/ignore` at 7.0.12 again, so
+  `npm ci` succeeds under npm 10 on Node 22 as well as under npm 11 on Node 24; both were run
+  against the committed file and left it unchanged.
+- The website starts on `shiki` 4.5.0, the newest; the Python sample it highlights is identical to
+  what 3.23.0, the version the site was drafted on, produced.
+
+### Testing
+
+- `npm run lint`, `npx --no -- n8n-node lint`, `npm run format:check`, `npm run build` and `npm
+  run test:coverage` pass on this tree: 1161 tests in 25 files, 100 for statements, branches,
+  functions and lines. `website/build.sh` builds the page from the same tree.
+- Both lint legs of the 0.38.0 verification scanner pass, run locally through its own
+  `analyzePackage`: the source leg on this tree and the tarball leg on what `npm pack` produces,
+  46 files. A `console.log` added to a copy of either fails its leg with `no-console`, so the pass
+  is a reading of those files. The provenance check can only run on the published package, through
+  `npm run scan`.
+
 ## 0.6.0 (2026-09-11)
 
 **In short.** Three operations are new, Get Account Configuration, Get Many Instances and Set Cost

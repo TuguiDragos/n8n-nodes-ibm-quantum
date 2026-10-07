@@ -140,8 +140,9 @@ Node.js 22 is enough only for n8n 2.35 and older, and `engines.node` stays `>=22
   publishes on Tuesdays, and run the whole suite on the new version in the same change.
 - **One lockfile has to satisfy both npm versions CI uses.** CI runs `npm ci` under npm 10 on Node
   22 and npm 11 on Node 24, and the two disagree about optional peers: npm 11 leaves out the
-  `ignore` 7.0.9 that `@langchain/community`, deep in the `@n8n/node-cli` tree, declares as one,
-  and npm 10 then refuses to install with "Missing: ignore@7.0.9 from lock file". After any
+  `ignore` that `@langchain/community`, deep in the `@n8n/node-cli` tree, declares as one, and
+  npm 10 then refuses to install with "Missing: ignore@7.0.12 from lock file" (7.0.9 before
+  0.6.1; the version follows the newest `ignore` 7 release). After any
   `npm install` on Node 24, run `npm ci` under Node 22 as well, and if that entry is gone, put
   `node_modules/@n8n/ai-utilities/node_modules/ignore` back where npm 10 places it. The same split
   surfaced the other way round before 0.3.3 was tagged, when a lockfile npm 10 wrote lacked the

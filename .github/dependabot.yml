@@ -21,8 +21,7 @@ updates:
     # Toolchain bumps that need manual compatibility work. Each entry below says which bumps it
     # blocks and why; eslint and @eslint/js are the two blocked at every level, not just at a major.
     ignore:
-      # TypeScript 7 removes moduleResolution=node10 (which tsconfig.json uses) and the current
-      # typescript-eslint cannot load against it. Moving up needs a manual tsconfig migration.
+      # typescript-eslint does not support TypeScript 7 yet (its peer range ends below 6.1).
       - dependency-name: typescript
         update-types: [version-update:semver-major]
       # @n8n/eslint-plugin-community-nodes peer-depends on eslint exactly 9.29.0, so ANY eslint

@@ -3,7 +3,7 @@
 This file is the machine-oriented reference for the `n8n-nodes-ibm-quantum` package: every node,
 operation, parameter (with its internal name), output shape and known hardware pitfall, stated
 plainly so an LLM can configure the nodes or generate n8n workflow JSON without guessing.
-It is generated from the source of version 0.6.0. The human-oriented documentation is README.md;
+It is generated from the source of version 0.6.1. The human-oriented documentation is README.md;
 release history is CHANGELOG.md.
 
 Unofficial, community-maintained package. Not affiliated with, endorsed by, or sponsored by IBM.
