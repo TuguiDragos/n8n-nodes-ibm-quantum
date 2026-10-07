@@ -22,6 +22,7 @@ Node.js 22 is enough only for n8n 2.35 and older, and `engines.node` stays `>=22
 | `nodes/IbmQuantum/qasm3.ts` | gate palette, validation and OpenQASM 3 rendering |
 | `nodes/IbmQuantum/results.ts` | sampler and estimator result parsing |
 | `nodes/IbmQuantum/triggerPoll.ts` | shared polling loop for both triggers |
+| `nodes/IbmQuantum/loadOptions.ts` | the backend dropdown and its labels |
 | `credentials/IbmQuantumApi.credentials.ts` | IAM token exchange and the connection test |
 | `*.node.json` | codex metadata: picker category, search aliases, docs links |
 | `scripts/qa-run.mjs` | the live harness: runs every read operation, the lifecycles and both triggers against a real n8n and a real account; run by hand, not shipped |
@@ -83,10 +84,8 @@ Node.js 22 is enough only for n8n 2.35 and older, and `engines.node` stays `>=22
   `qubitsOf`, `processorTypeOf` and `waitTimeOf` do, rather than copying it into the returned
   object. An operation that hands IBM's body back untouched is exempt: that shape is IBM's, and the
   docs say so. `getLeastBusy` copied `name` and `qubits` that way until 0.6.0. A parameter counts as
-  much as a body field: Session > Create still copies its Session Mode straight into `mode`, so a
-  Session Mode an expression leaves empty drops that documented key from the item. Correcting it is
-  a change of its own, because the same value also goes into the request body, where `undefined`
-  omits the field and `null` sends an explicit null.
+  much as a body field: Session > Create copied an empty Session Mode into `mode` until 0.6.0, when
+  an empty one started keeping the default `batch`.
 - **Re-wrapping an n8n error adds only `failure`.** `new NodeApiError(node, err, options)` hands
   back `err` itself when `err` is already a `NodeApiError`, applying that one option to it and
   discarding the rest, so the item index n8n points at cannot be attached that way. `asNodeError`

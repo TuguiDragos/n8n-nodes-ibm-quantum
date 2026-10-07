@@ -8,5 +8,5 @@ Describe what this pull request changes and why.
 - [ ] `npx --no -- n8n-node lint` passes
 - [ ] `npm run format:check` passes
 - [ ] `npm run build` passes
-- [ ] `npm test` passes
+- [ ] `npm run test:coverage` passes
 - [ ] Tests cover the change where practical

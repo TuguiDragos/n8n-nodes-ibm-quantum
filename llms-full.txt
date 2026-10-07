@@ -108,12 +108,14 @@ what is in force: `parameters` only echoes the last request. Removing a cap take
 switch, and what it leaves in force is the plan's default, not no limit: measured on the Open plan,
 a clear sent `instance_limit_seconds: null`, the response echoed that null under `parameters`, and
 `extensions` reported 600, so `instanceLimitSeconds` read 600. Never a zero: a Cost Limit that is not a whole number of at least 1 fails before the
-request, so an expression that resolves to nothing cannot clear the cap by accident. Which IBM
-Cloud platform role the write requires has not been verified; IBM's cost guide says only
-administrators and owners can edit an instance. The Resource Controller path has not been exercised
-from this project against a live account (the 0.4.1 verification covered the old endpoint only), so
-treat the first write as a test and confirm with `getManyInstances`. A limit that is reached
-cancels running jobs with status Cancelled and reason "Ran too long"; queued jobs stay queued.
+request, so an expression that resolves to nothing cannot clear the cap by accident. Which IBM Cloud
+platform role the write requires has not been verified; IBM's cost guide says only administrators
+and owners can edit an instance, so with a key from another role, confirm the first write with
+`getManyInstances`. The Resource Controller path has run against a live Open plan account, on
+2026-09-10: a write raised the limit from 600 to 2000 and read back 2000, `clearLimit` read back
+600, a foreign CRN was refused by IBM and a malformed one locally; TESTING.md records each step. A
+limit that is reached cancels running jobs with status Cancelled and reason "Ran too long"; queued
+jobs stay queued.
 
 `getAccountConfiguration` is the account-wide read. `getUsage`, `getInstance` and `getConfiguration`
 describe the one instance the credential's CRN names; `/accounts/{id}` lists every plan on that
@@ -767,7 +769,8 @@ count, so an estimator result ignores the name entirely.
   observables, non-object Additional Options, an Additional Options top-level key outside the
   program's schema, invalid register sizes, a switch an expression left as something other than true
   or false, and a malformed API version.
-- Every HTTP request has a 30-second timeout. Numeric fields bypassed by expressions are either
+- Every HTTP request the node itself issues has a 30-second timeout; the IAM token exchange and
+  the credential test take n8n's defaults. Numeric fields bypassed by expressions are either
   clamped or refused. Clamped: shots and limits fall back to defaults, Job Get Many caps at 200 per
   request and at 50 pages with Return All, Workload Get Many at 50 per request and at 20 pages,
   trigger "Jobs to Scan" at 200, the job cost at 10800, and the three noise learning counts in
@@ -973,7 +976,7 @@ QASM for hardware. Attach the ACTION node only; the triggers are not tools.
 
 No environment variable gates tool usage. `N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE` was removed in
 n8n 1.85.0 (March 2025), which turned tool usage on for every community node; do not tell users to
-set it. The variables n8n reads as of 2.37 concern community packages as a whole:
+set it. The variables n8n reads as of 2.42 concern community packages as a whole:
 `N8N_COMMUNITY_PACKAGES_ENABLED` (default true; false disables verified and unverified packages
 alike), `N8N_VERIFIED_PACKAGES_ENABLED` (default true), `N8N_UNVERIFIED_PACKAGES_ENABLED` (default
 true, false from n8n 3.0), `N8N_COMMUNITY_PACKAGES_PREVENT_LOADING` (default false),
@@ -1007,7 +1010,8 @@ Reference: https://docs.n8n.io/deploy/host-n8n/configure-n8n/basic-configuration
   sharing the same `shots`, `parameters`, `observables` and `precision`. Batching pays the roughly
   two second per job overhead once instead of once per circuit. To run many parameter sets, pass
   an array of circuits, use `parameters` bindings with arrays, or several Submits in a session.
-- Every request times out after 30 seconds, so a hung connection cannot stall an execution.
+- Every request the node itself issues times out after 30 seconds, so a hung connection cannot
+  stall an execution.
 - Get Results poll values are clamped to at least 1 second; defaults are a 5 second interval and a
   300 second maximum wait.
 - Get Results polls with `exclude_params=true`, like the triggers, so the circuit payload is never

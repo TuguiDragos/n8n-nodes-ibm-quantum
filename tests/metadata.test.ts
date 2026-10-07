@@ -534,13 +534,7 @@ describe('the pull request checklist matches CI', () => {
 	});
 
 	it("asks for every check CI runs, in CI's order", () => {
-		expect(checklist).toEqual([
-			'npm run lint',
-			'npx --no -- n8n-node lint',
-			'npm run format:check',
-			'npm run build',
-			'npm test',
-		]);
+		expect(checklist).toEqual(ciCommands.slice(1));
 	});
 });
 
