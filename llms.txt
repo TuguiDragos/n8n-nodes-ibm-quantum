@@ -24,6 +24,7 @@ because the Qiskit Runtime configuration endpoint is deprecated.
 - [Complete AI reference](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/llms-full.txt): every node, operation, parameter (internal names), output shape, error code and workflow pattern, in one file. Start here.
 - [Contributor guide for AI agents](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/AGENTS.md): repository layout, the rules that are not obvious, and what to run before finishing a change
 - [README](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/README.md): human-oriented guide with screenshots, transpilation explainer and troubleshooting
+- [Website](https://n8n-nodes-ibm-quantum.tuguidragos.com): what the node does, the gates real hardware runs, the hardware record and the questions people ask, on one page
 - [Changelog](https://raw.githubusercontent.com/TuguiDragos/n8n-nodes-ibm-quantum/main/CHANGELOG.md): release history, including hardware-verified fixes
 
 ## Optional

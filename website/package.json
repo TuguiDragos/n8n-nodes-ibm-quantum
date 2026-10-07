@@ -1,0 +1,9 @@
+{
+  "name": "n8n-nodes-ibm-quantum-website",
+  "private": true,
+  "description": "Builds n8n-nodes-ibm-quantum.tuguidragos.com from this repository.",
+  "type": "module",
+  "dependencies": {
+    "shiki": "4.5.0"
+  }
+}

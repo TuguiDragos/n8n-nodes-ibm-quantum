@@ -52,3 +52,8 @@ updates:
       github-actions:
         patterns:
           - "*"
+  # shiki, which colors the code samples on the website.
+  - package-ecosystem: npm
+    directory: /website
+    schedule:
+      interval: monthly

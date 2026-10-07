@@ -26,6 +26,7 @@ Node.js 22 is enough only for n8n 2.35 and older, and `engines.node` stays `>=22
 | `credentials/IbmQuantumApi.credentials.ts` | IAM token exchange and the connection test |
 | `*.node.json` | codex metadata: picker category, search aliases, docs links |
 | `scripts/qa-run.mjs` | the live harness: runs every read operation, the lifecycles and both triggers against a real n8n and a real account; run by hand, not shipped |
+| `website/` | n8n-nodes-ibm-quantum.tuguidragos.com, built by `.github/workflows/website.yml` on every push to `main` and published to GitHub Pages; not shipped |
 
 ## Rules that are not obvious
 
@@ -167,6 +168,16 @@ Node.js 22 is enough only for n8n 2.35 and older, and `engines.node` stays `>=22
   codex `.node.json` files as well as the TypeScript, plus the `index.js` its tarball leg lints and
   `tests/`, which the gate never reads. Narrow one of the paths the scanner reads and the narrowed
   path passes CI and fails the gate.
+
+- **The website quotes the docs, and its build checks every quote.** `website/scripts/build_site.py`
+  asserts sentences of README.md, SECURITY.md and TESTING.md word for word, and reads the totals
+  table and the "By backend" sentence of TESTING.md, the gate palette out of `descriptions.ts` and
+  the Trigger On options out of `IbmQuantumTrigger.node.ts`; `website/build.sh` runs the unit suite
+  before it, under the same 100 gate. Rewording one of those sentences, or adding a gate, fails the
+  Website workflow on the next push to `main` at the assertion that no longer holds, and the
+  published site stays as it was. Run `website/build.sh` after such a change, and fix the page or
+  the assertion in the same change. `website/README.md` says what each figure on the page is read
+  from.
 
 ## Before you finish
 

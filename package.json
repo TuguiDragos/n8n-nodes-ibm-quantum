@@ -18,7 +18,11 @@
     "trigger"
   ],
   "license": "MIT",
-  "homepage": "https://tuguidragos.com",
+  "homepage": "https://n8n-nodes-ibm-quantum.tuguidragos.com",
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/TuguiDragos"
+  },
   "author": {
     "name": "Țugui Dragoș-Constantin",
     "email": "contact@tuguidragos.com",
