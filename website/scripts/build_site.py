@@ -237,15 +237,21 @@ GALLERY = [
 ]
 for _, name, width, alt, _ in GALLERY:
     assert alt in readme, alt
+# Screenshots keep transparent corners of CORNER px; without the alpha channel they would show black.
+CORNER = 39
+for path in (WEB / "static/images").glob("*.webp"):
+    head = path.read_bytes()[:21]
+    assert head[12:16] == b"VP8X" and head[20] & 0x10, f"{path.name} lost its transparency"
 shot_tabs, shot_panels = [], []
 for i, (label, name, width, alt, caption) in enumerate(GALLERY):
     slug = "shot-" + name.split("-", 1)[1]
     widths = sorted({800, 1200, min(1600, width)})
     srcset = ", ".join(f"images/{name}-{w}.webp {w}w" for w in widths)
     h = round(1050 * 1200 / width)
+    radius = f"{CORNER / width:.2%} / {CORNER / 1050:.2%}"
     shot_tabs.append(f'<li><button type="button" data-tab="{slug}" aria-pressed="{"true" if i == 0 else "false"}" aria-controls="{slug}">{esc(label)}</button></li>')
     shot_panels.append(f'''<figure class="panel shot{" active" if i == 0 else ""}" id="{slug}">
-            <a href="images/{name}-{max(widths)}.webp"><img src="images/{name}-1200.webp" srcset="{srcset}" sizes="(max-width: 640px) calc(100vw - 32px), (max-width: 1124px) calc(100vw - 44px), 1080px" width="1200" height="{h}" loading="lazy" decoding="async" alt="{esc(alt)}"></a>
+            <a href="images/{name}-{max(widths)}.webp"><img src="images/{name}-1200.webp" srcset="{srcset}" sizes="(max-width: 640px) calc(100vw - 32px), (max-width: 1124px) calc(100vw - 44px), 1080px" width="1200" height="{h}" loading="lazy" decoding="async" style="border-radius: {radius}" alt="{esc(alt)}"></a>
             <figcaption>{esc(caption)}</figcaption>
           </figure>''')
 

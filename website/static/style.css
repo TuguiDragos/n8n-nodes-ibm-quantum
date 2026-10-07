@@ -515,10 +515,6 @@ td code {
   font-weight: 600;
 }
 
-.statement code {
-  font-size: 0.82em;
-}
-
 /* Highlights */
 .highlights {
   display: grid;
@@ -612,16 +608,14 @@ td code {
 
 
 /* Code keeps its lines: a wrapped Python line would read as two statements, so a block wider than its box scrolls. */
-.code pre,
-.cards pre {
+.code pre {
   overflow-x: auto;
   white-space: pre;
   scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
   scrollbar-width: thin;
 }
 
-.code pre:focus-visible,
-.cards pre:focus-visible {
+.code pre:focus-visible {
   outline-offset: -3px;
 }
 
@@ -670,14 +664,6 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 15px;
-  text-align: left;
-}
-
-caption {
-  padding: 16px 20px 0;
-  color: var(--text-2);
-  font-size: 14px;
-  font-weight: 600;
   text-align: left;
 }
 
@@ -738,20 +724,6 @@ td + td {
   color: var(--text-2);
   font-size: 15px;
   line-height: 1.53;
-}
-
-.cards pre {
-  margin: 18px 0 0;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: var(--code-bg);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
-  color: #c8d3f5;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.6;
-  letter-spacing: 0;
-  text-align: left;
 }
 
 
@@ -854,10 +826,6 @@ td + td {
 
 .closing .actions {
   margin-top: 28px;
-}
-
-.closing .requirements {
-  color: var(--text-2);
 }
 
 footer {

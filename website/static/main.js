@@ -62,5 +62,5 @@ if ("ResizeObserver" in window) {
       else target.removeAttribute("tabindex");
     }
   });
-  document.querySelectorAll(".code pre, .cards pre").forEach((pre) => scrollers.observe(pre));
+  document.querySelectorAll(".code pre").forEach((pre) => scrollers.observe(pre));
 }
