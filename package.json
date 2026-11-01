@@ -78,7 +78,7 @@
   "devDependencies": {
     "@eslint/js": "9.29.0",
     "@n8n/eslint-plugin-community-nodes": "^0.35.0",
-    "@n8n/node-cli": "^0.51.3",
+    "@n8n/node-cli": "^1.0.1",
     "@types/node": "^26.6.4",
     "@vitest/coverage-v8": "^5.0.3",
     "eslint": "9.29.0",
